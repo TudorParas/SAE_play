@@ -1,0 +1,76 @@
+######################################################
+#  2025-10-30
+######################################################
+
+SIMPLE SAE ON PYTHIA-70M - EXECUTION LOG
+
+## What This Script Does: The Full Pipeline
+
+### 1. Collected Training Data from the LLM
+- Ran 10 different texts through Pythia-70M
+- Captured the internal activations from layer 3 (middle layer out of 6)
+- Got 120 activation vectors, each with 512 dimensions
+- Think of these as "snapshots of what the model is thinking" at that layer
+
+### 2. Trained a Sparse Autoencoder
+- Built an SAE that expands 512 dimensions → 2048 dimensions (4x wider)
+- Trained it to reconstruct the original activations while being sparse
+- Watched two metrics improve:
+  - Reconstruction Loss (0.1076 → 0.0044): Getting better at rebuilding the original activations
+  - Sparsity (~0.85): Most features stayed close to zero (this is what we want!)
+
+### 3. Analyzed What Features Activate
+For three new test sentences, checked which of those 2048 sparse features "light up"
+
+## Results Observed
+
+Test 1 - 'Dogs are man's best friend.'
+  Top 10 active features: 124, 1388, 120, 1530, 507, 1469, 160, 527, 1460, 718
+  Sparsity: 57.1% of features active (threshold=0.01)
+
+Test 2 - 'Neural networks process information.'
+  Top 10 active features: 1388, 124, 1530, 507, 160, 527, 1469, 718, 1460, 120
+  Sparsity: 50.2% of features active (threshold=0.01)
+
+Test 3 - 'London is a major city.'
+  Top 10 active features: 1388, 124, 507, 527, 1530, 1469, 718, 807, 114, 1460
+  Sparsity: 55.3% of features active (threshold=0.01)
+
+## Interpretation
+
+**The Good:**
+- The SAE learned to represent 512-dimensional activations using a sparse subset of 2048 features
+- Different texts activate different patterns of features (though with overlap)
+- About 50-57% of features are active (above threshold 0.01)
+
+**The Interesting Pattern:**
+The same features keep appearing across all three texts:
+- Feature 1388, 124, 507, 527, 1530, 1469, 718, 1460...
+
+These are probably "general" features that activate for most text, like:
+- Basic syntax patterns
+- Common token processing
+- General language understanding
+
+**What We DON'T Know Yet:**
+- What do these features actually represent? (Feature 124 = ???)
+- Are they interpretable human concepts?
+- Would they transfer to other models?
+
+## Current Limitations
+
+With only 10 training sentences and a tiny model, we haven't learned very specialized features.
+This is more like "proof of concept" - the machinery works!
+
+**To make this more interesting:**
+- Way more training data (thousands of texts)
+- More diverse texts to capture different concepts
+- Tools to probe what each feature responds to
+- Visualization of feature activations
+
+## Accomplishment
+
+Successfully:
+- Built an SAE from scratch
+- Applied it to a real LLM
+- Seen sparse features activate differently for different inputs
