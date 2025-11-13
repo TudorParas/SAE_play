@@ -1,5 +1,5 @@
 """
-Simple Sparse Autoencoder (SAE) applied to Pythia model activations
+Simple Sparse Autoencoder (SAE) applied to Pythia model activations. Baseline RELU autoencoder.
 
 This script demonstrates the basics of mechanistic interpretability with SAEs:
 1. Load a small Pythia model
@@ -19,13 +19,12 @@ from load_pile_data import load_pile_samples
 from tqdm import tqdm
 from pathlib import Path
 import json
-import signal
 import sys
 import time
 
 # Add parent directory to path to import util module
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from util.logging import setup_logger, format_time
+from src.util.logging import setup_logger, format_time
 
 # Setup logger for this module
 logger = setup_logger("SAE")
@@ -54,37 +53,6 @@ def format_number_si(num: int) -> str:
         return str(num)
 
 
-class GracefulInterruptHandler:
-    """
-    Handler for graceful shutdown on interrupt (Ctrl+C or PyCharm Stop).
-
-    Uses threading.Event to safely handle SIGINT/SIGTERM without doing I/O
-    inside the signal handler.
-
-    Waits for current epoch to complete before exiting - no stdin prompt
-    needed (avoids stdin corruption from PyCharm Stop button).
-    """
-
-    def __init__(self):
-        import threading
-        self.shutdown_requested = threading.Event()
-
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self._request_shutdown)
-        try:
-            signal.signal(signal.SIGTERM, self._request_shutdown)
-        except Exception:
-            pass  # SIGTERM not available on all platforms
-
-    def _request_shutdown(self, signum, frame):
-        """Signal handler: just set a flag, don't do I/O here"""
-        self.shutdown_requested.set()
-
-    def should_exit(self):
-        """Check if shutdown was requested"""
-        return self.shutdown_requested.is_set()
-
-
 # ============================================================================
 # PART 1: Define the Sparse Autoencoder
 # ============================================================================
@@ -102,22 +70,29 @@ class SparseAutoencoder(nn.Module):
     separate dimensions instead of being "compressed" together.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int):
+    def __init__(self, input_dim: int, hidden_dim: int, top_k: int = 0):
         """
         Args:
             input_dim: Size of the activations we're encoding (e.g., 512)
             hidden_dim: Size of sparse representation (typically 2-8x larger)
+            top_k: If > 0, use TopK activation (keep only top-k features per sample)
+                   If 0, use standard ReLU with L1 penalty
         """
         super().__init__()
 
+        self.top_k = top_k  # Store for use in forward pass
+
         # Encoder: maps activations to sparse features
         self.encoder = nn.Linear(input_dim, hidden_dim)
+        self.bias_pre = nn.Parameter(torch.zeros(input_dim))
+        self.bias_enc = nn.Parameter(torch.zeros(hidden_dim))
 
         # Decoder: reconstructs original activations from sparse features
         self.decoder = nn.Linear(hidden_dim, input_dim)
 
         # We'll use ReLU activation to ensure non-negative sparse features
         # (negative features are harder to interpret)
+        # If top_k > 0, we'll use TopK activation instead
 
         # Initialize weights properly using Xavier initialization
         # This helps with optimization compared to PyTorch's default
@@ -136,12 +111,50 @@ class SparseAutoencoder(nn.Module):
             sparse_features: The sparse representation (what we want to interpret!)
         """
         # Encode to sparse features
-        sparse_features = F.relu(self.encoder(x))
+        pre_activation = self.encoder(x - self.bias_pre) + self.bias_enc
+
+        if self.top_k > 0:
+            # TopK activation: keep only top-k features per sample
+            # This is differentiable - gradients flow through the selected positions
+            sparse_features = self.topk_activation(F.relu(pre_activation), self.top_k)
+        else:
+            # Standard ReLU activation (for L1 penalty training)
+            sparse_features = F.relu(pre_activation)
 
         # Decode back to original space
-        reconstructed = self.decoder(sparse_features)
+        reconstructed = self.decoder(sparse_features) + self.bias_pre
 
         return reconstructed, sparse_features
+
+    def topk_activation(self, x, k):
+        """
+        Keep only the top-k values per sample, zero out the rest.
+        This is differentiable - gradients flow through the top-k positions.
+
+        Why this works for backprop:
+        - torch.topk() is differentiable
+        - scatter_() is differentiable
+        - Zero positions naturally get zero gradient
+
+        Args:
+            x: Input tensor, shape (batch_size, hidden_dim)
+            k: Number of top values to keep per sample
+
+        Returns:
+            Tensor with same shape, but only top-k values non-zero per row
+        """
+        # Find top-k values and their indices for each sample
+        # dim=-1 means we find top-k along the feature dimension (per sample)
+        topk_values, topk_indices = torch.topk(x, k=k, dim=-1)
+
+        # Create output filled with zeros
+        result = torch.zeros_like(x)
+
+        # Scatter the top-k values back to their original positions
+        # This preserves the indices and is fully differentiable
+        result.scatter_(-1, topk_indices, topk_values)
+
+        return result
 
 
 # ============================================================================
@@ -153,7 +166,8 @@ def get_model_activations(
     tokenizer,
     texts: List[str],
     layer_idx: int = None,
-    batch_size: int = 8
+    batch_size: int = 8,
+    max_length=128,
 ) -> torch.Tensor:
     """
     Extract per-token activations from a specific layer.
@@ -175,6 +189,7 @@ def get_model_activations(
         layer_idx: Which transformer layer to extract from (0 = first layer)
                    If None, uses the middle layer
         batch_size: How many texts to process at once (for GPU efficiency)
+        max_length: Maximum number of tokens in a single text.
 
     Returns:
         Tensor of activations, shape (total_num_real_tokens, hidden_dim)
@@ -187,7 +202,7 @@ def get_model_activations(
         layer_idx = num_layers // 2  # Use middle layer
 
     # Validate layer index
-    if layer_idx >= num_layers or layer_idx < 0:
+    if not 0 <= layer_idx < num_layers:  # ToDo: just assert
         raise ValueError(f"layer_idx {layer_idx} is out of range. Model has {num_layers} layers (0-{num_layers-1})")
 
     logger.info(f"Model has {num_layers} layers, extracting from layer {layer_idx}")
@@ -208,7 +223,7 @@ def get_model_activations(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=128
+            max_length=max_length,
         )
 
         # Move to GPU
@@ -244,6 +259,7 @@ def get_model_activations(
     # Concatenate all token activations into one big tensor
     # Final shape: (total_num_tokens_across_all_texts, hidden_dim)
     # If you had 1000 texts with ~50 tokens each → ~50,000 activation vectors
+    # ToDo: if we'd like to preserve context, we shouldn't concatenate.
     all_activations = torch.cat(all_activations, dim=0)
 
     logger.info(f"Collected {all_activations.shape[0]} token activations (padding filtered out)")
@@ -262,12 +278,10 @@ def train_sae(
     num_epochs: int = 100,
     batch_size: int = 32,
     learning_rate: float = 1e-3,
+    top_k: int = 0,
     sparsity_penalty: float = 1e-3,
     sparsity_penalty_end: float = None,
-    warmup_epochs: int = 20,
-    checkpoint_dir: str = None,
-    model_name: str = "EleutherAI/pythia-70m",
-    layer_idx: int = 3
+    warmup_epochs: int = 20
 ):
     """
     Train the sparse autoencoder on collected activations.
@@ -289,12 +303,10 @@ def train_sae(
         num_epochs: How many times to iterate over the data
         batch_size: Batch size for training
         learning_rate: Learning rate for optimizer
+        top_k: Whether to use top-k sparse features ( > 0) or L1 (otherwise).
         sparsity_penalty: Starting weight of L1 penalty (or fixed if no schedule)
         sparsity_penalty_end: Final weight of L1 penalty (enables schedule if set)
         warmup_epochs: Number of epochs before starting to increase penalty
-        checkpoint_dir: Directory to save checkpoint if interrupted (None = no checkpointing)
-        model_name: Model name for checkpoint metadata
-        layer_idx: Layer index for checkpoint metadata
 
     Returns:
         mean: The mean of the activations (needed for inference)
@@ -307,9 +319,6 @@ def train_sae(
     centered_activations = activations - mean
 
     optimizer = torch.optim.Adam(sae.parameters(), lr=learning_rate)
-
-    # Set up graceful interrupt handler (Ctrl+C / PyCharm Stop)
-    interrupt_handler = GracefulInterruptHandler()
 
     num_samples = centered_activations.shape[0]
 
@@ -350,7 +359,6 @@ def train_sae(
 
         total_loss = 0
         total_recon_loss = 0
-        total_sparsity_loss = 0
         total_pct_active = 0  # Track percentage of active features
         num_batches = 0
 
@@ -364,18 +372,18 @@ def train_sae(
 
             # Reconstruction loss: mean squared error
             recon_loss = F.mse_loss(reconstructed, batch)
-
-            # Sparsity loss: L1 norm (sum of absolute values)
-            # We want this to be small = most features are zero
-            sparsity_loss = torch.abs(sparse_features).mean()
+            if top_k <= 0:
+                # Sparsity loss: L1 norm (sum of absolute values)
+                # We want this to be small = most features are zero
+                sparsity_loss = torch.abs(sparse_features).mean()
+                loss = recon_loss + current_penalty * sparsity_loss
+            else:
+                loss = recon_loss
 
             # Track actual sparsity: what % of features are active?
             # A feature is "active" if it's > 0.01
             num_active = (sparse_features > 0.01).float().sum(dim=1).mean().item()
             pct_active = (num_active / sparse_features.shape[1]) * 100
-
-            # Total loss (using current scheduled penalty)
-            loss = recon_loss + current_penalty * sparsity_loss
 
             # Backward pass
             optimizer.zero_grad()
@@ -385,14 +393,12 @@ def train_sae(
             # Track metrics
             total_loss += loss.item()
             total_recon_loss += recon_loss.item()
-            total_sparsity_loss += sparsity_loss.item()
             total_pct_active += pct_active
             num_batches += 1
 
         # Calculate epoch averages
         avg_loss = total_loss / num_batches
         avg_recon = total_recon_loss / num_batches
-        avg_sparsity = total_sparsity_loss / num_batches
         avg_pct_active = total_pct_active / num_batches
         avg_num_active = (avg_pct_active / 100) * sae.encoder.out_features
 
@@ -400,29 +406,7 @@ def train_sae(
         epoch_time = time.time() - epoch_start_time
 
         # Log epoch metrics with timing
-        logger.info(f"Epoch {epoch+1:3d}/{num_epochs} | Loss: {avg_loss:7.4f} | Recon: {avg_recon:7.4f} | L1: {avg_sparsity:6.4f} | Active: {avg_num_active:6.0f}/{sae.encoder.out_features} ({avg_pct_active:4.1f}%) | Time: {format_time(epoch_time)}")
-
-        # Check if interrupted by Ctrl+C or PyCharm Stop button
-        if interrupt_handler.should_exit():
-            logger.warning("Training interrupted by user")
-            logger.info("="*60)
-            logger.info("TRAINING INTERRUPTED")
-            logger.info("="*60)
-
-            if checkpoint_dir is not None:
-                checkpoint_path = f"{checkpoint_dir}_epoch{epoch+1}"
-                logger.info(f"Saving checkpoint to: {checkpoint_path}")
-
-                try:
-                    save_sae(sae, mean, checkpoint_path, model_name, layer_idx)
-                    logger.info("Checkpoint saved successfully!")
-                except Exception as e:
-                    logger.error(f"Failed to save checkpoint: {e}")
-            else:
-                logger.info("(No checkpoint directory specified, cannot save)")
-
-            logger.info("Exiting...")
-            sys.exit(0)
+        logger.info(f"Epoch {epoch+1:3d}/{num_epochs} | Loss: {avg_loss:7.4f} | Recon: {avg_recon:7.4f} | Active: {avg_num_active:6.0f}/{sae.encoder.out_features} ({avg_pct_active:4.1f}%) | Time: {format_time(epoch_time)}")
 
     logger.info("="*60)
     logger.info("TRAINING COMPLETE")
@@ -622,7 +606,7 @@ def main():
     print("\nLoading training texts from The Pile...")
     training_texts = load_pile_samples(
         data_file="data/pile_samples.json",
-        num_samples=10000,  # Use 1000 texts for training
+        num_samples=1000,
         shuffle=True
     )
 
@@ -647,22 +631,31 @@ def main():
     hidden_dim = input_dim * 27 # input_dim ** 2  # 4x wider for sparse features
 
     print(f"\nCreating SAE: {input_dim} -> {hidden_dim} -> {input_dim}")
-    sae = SparseAutoencoder(input_dim, hidden_dim).to(device)
+
+    # TopK configuration
+    # Set TOP_K > 0 to use TopK activation (e.g., 32, 64, 128)
+    # Set TOP_K = 0 to use standard ReLU with L1 penalty
+    TOP_K = 300
+    sae = SparseAutoencoder(input_dim, hidden_dim, top_k=TOP_K).to(device)
     layer_idx = 3
+
     # Train the SAE with sparsity annealing
     print("\nTraining SAE...")
+    if TOP_K > 0:
+        print(f"Using TopK activation with k={TOP_K}")
+    else:
+        print("Using ReLU activation with L1 penalty")
+
     mean = train_sae(
         sae,
         activations,
         num_epochs=20,
         batch_size=32,
         learning_rate=1e-3,
-        sparsity_penalty=1e-2,  # Start
-        sparsity_penalty_end=2.0,  # Much higher!
-        warmup_epochs=2,             # Keep low penalty for first 20 epochs
-        checkpoint_dir=f"checkpoints/pythia-70m_layer{layer_idx}_{format_number_si(hidden_dim)}_interrupted",  # Enable Ctrl+C checkpoints
-        model_name=model_name,
-        layer_idx=layer_idx
+        top_k=TOP_K,
+        sparsity_penalty=1e-2,  # Start (only used if TOP_K = 0)
+        sparsity_penalty_end=2.0,  # Much higher! (only used if TOP_K = 0)
+        warmup_epochs=2  # Keep low penalty for first 20 epochs
     )
 
     # Test on some new examples
