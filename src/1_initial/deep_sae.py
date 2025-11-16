@@ -1,13 +1,13 @@
 """
-Simple Sparse Autoencoder (SAE) applied to Pythia model activations. Baseline RELU autoencoder.
+Deep Sparse Autoencoder (SAE) applied to Pythia model activations.
 
-This script demonstrates the basics of mechanistic interpretability with SAEs:
+This script explores deep (multi-layer) SAE architectures:
 1. Load a small Pythia model
 2. Extract activations from a specific layer
-3. Train a sparse autoencoder on those activations
+3. Train a deep sparse autoencoder with multiple encoder/decoder layers
 4. See what sparse features we learn
 
-Keep it simple - this is for learning, not production!
+Experimenting with deeper architectures for better feature learning!
 """
 
 import torch
@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.util.logging import setup_logger, format_time
 
 # Setup logger for this module
-logger = setup_logger("SAE")
+logger = setup_logger("DeepSAE")
 
 
 # ============================================================================
@@ -57,47 +57,72 @@ def format_number_si(num: int) -> str:
 # PART 1: Define the Sparse Autoencoder
 # ============================================================================
 
-class SparseAutoencoder(nn.Module):
+class DeepSparseAutoencoder(nn.Module):
     """
-    A simple sparse autoencoder.
+    A deep (multi-layer) sparse autoencoder.
 
     Architecture:
-    - Encoder: Linear layer that expands dimensions (e.g., 512 -> 2048)
-    - Decoder: Linear layer that contracts back (e.g., 2048 -> 512)
-    - Sparsity: Enforced via L1 penalty on activations
+    - Encoder: Deep network that expands dimensions (e.g., 512 -> 1024 -> 2048)
+    - Decoder: Deep network that contracts back (e.g., 2048 -> 1024 -> 512)
+    - Sparsity: Enforced via L1 penalty or TopK on activations
 
-    Why wider (overcomplete)? Gives space for different features to occupy
-    separate dimensions instead of being "compressed" together.
+    Why deeper? Multiple layers can learn hierarchical feature representations,
+    potentially capturing more complex patterns than a single-layer SAE.
     """
 
-    def __init__(self, input_dim: int, hidden_dim: int, top_k: int = 0):
+    def __init__(
+            self,
+            input_dim: int,
+            encoder_hidden_dims: List[int],
+            decoder_hidden_dims: List[int],
+            top_k: int = 0):
         """
         Args:
             input_dim: Size of the activations we're encoding (e.g., 512)
-            hidden_dim: Size of sparse representation (typically 2-8x larger)
+            encoder_hidden_dims: ToDo
+            decoder_hidden_dims: ToDo. If empty will be a linear layer.
             top_k: If > 0, use TopK activation (keep only top-k features per sample)
                    If 0, use standard ReLU with L1 penalty
         """
         super().__init__()
 
+        self.input_dim = input_dim
         self.top_k = top_k  # Store for use in forward pass
+        self.encoder_hidden_dims = encoder_hidden_dims
+        self.decoder_hidden_dims = decoder_hidden_dims
+        self.probe_dimension = encoder_hidden_dims[-1]
 
         # Encoder: maps activations to sparse features
-        self.encoder = nn.Linear(input_dim, hidden_dim, bias=False)
-        self.bias_pre = nn.Parameter(torch.zeros(input_dim))
-        self.bias_enc = nn.Parameter(torch.zeros(hidden_dim))
+        encoder_layers = []
+        for in_dim, out_dim in zip([input_dim, *encoder_hidden_dims[:-1]], encoder_hidden_dims):
+            current_layer = nn.Linear(in_dim, out_dim, bias=False)
+            encoder_layers.append(current_layer)
+        self.encoder_layers = nn.ModuleList(encoder_layers)
 
-        # Decoder: reconstructs original activations from sparse features
-        self.decoder = nn.Linear(hidden_dim, input_dim, bias=False)
+        decoder_layers = []
+        for in_dim, out_dim in zip([self.probe_dimension, *decoder_hidden_dims], [*decoder_hidden_dims, input_dim]):
+            current_layer = nn.Linear(in_dim, out_dim, bias=False)
+            decoder_layers.append(current_layer)
+        self.decoder_layers = nn.ModuleList(decoder_layers)
+
+        self.bias_pre = nn.Parameter(torch.zeros(input_dim))
+        self.bias_probe = nn.Parameter(torch.zeros(self.probe_dimension))
+
 
         # We'll use ReLU activation to ensure non-negative sparse features
         # (negative features are harder to interpret)
         # If top_k > 0, we'll use TopK activation instead
 
+    def initialize_weights(self):
         # Initialize weights properly using Xavier initialization
         # This helps with optimization compared to PyTorch's default
-        nn.init.xavier_uniform_(self.encoder.weight)
-        nn.init.xavier_uniform_(self.decoder.weight)
+        for enc_layer in self.encoder_layers:
+            nn.init.xavier_uniform_(enc_layer.weight)
+        for dec_layer in self.decoder_layers:
+            nn.init.xavier_uniform_(dec_layer.weight)
+
+        # nn.init.zeros_(self.encoder.bias)
+        # nn.init.zeros_(self.decoder.bias)
 
     def forward(self, x):
         """
@@ -109,7 +134,11 @@ class SparseAutoencoder(nn.Module):
             sparse_features: The sparse representation (what we want to interpret!)
         """
         # Encode to sparse features
-        pre_activation = self.encoder(x - self.bias_pre) + self.bias_enc
+        x = x - self.bias_pre
+        for enc_layer in self.encoder_layers:
+            x = torch.relu(enc_layer(x))
+
+        pre_activation = x + self.bias_probe  # ToDo: maybe we shouldn't apply relu on last if we have top_K?
 
         if self.top_k > 0:
             # TopK activation: keep only top-k features per sample
@@ -120,7 +149,10 @@ class SparseAutoencoder(nn.Module):
             sparse_features = F.relu(pre_activation)
 
         # Decode back to original space
-        reconstructed = self.decoder(sparse_features) + self.bias_pre
+        reconstructed = sparse_features
+        for dec_layer in self.decoder_layers:
+            reconstructed = torch.relu(dec_layer(reconstructed))
+        reconstructed = reconstructed + self.bias_pre
 
         return reconstructed, sparse_features
 
@@ -271,7 +303,7 @@ def get_model_activations(
 # ============================================================================
 
 def train_sae(
-    sae: SparseAutoencoder,
+    sae: DeepSparseAutoencoder,
     activations: torch.Tensor,
     num_epochs: int = 100,
     batch_size: int = 32,
@@ -320,8 +352,9 @@ def train_sae(
 
     num_samples = centered_activations.shape[0]
 
-    logger.info(f"Training SAE on {num_samples} activation vectors...")
-    logger.info(f"Input dim: {sae.encoder.in_features}, Hidden dim: {sae.encoder.out_features}")
+    logger.info(f"Training Deep SAE on {num_samples} activation vectors...")
+    logger.info(f"Architecture: {sae.input_dim} → {sae.encoder_hidden_dims} → {sae.decoder_hidden_dims} → {sae.input_dim}")
+    logger.info(f"Probe dimension (sparse features): {sae.probe_dimension}")
 
     # Setup sparsity schedule
     use_schedule = sparsity_penalty_end is not None
@@ -398,13 +431,13 @@ def train_sae(
         avg_loss = total_loss / num_batches
         avg_recon = total_recon_loss / num_batches
         avg_pct_active = total_pct_active / num_batches
-        avg_num_active = (avg_pct_active / 100) * sae.encoder.out_features
+        avg_num_active = (avg_pct_active / 100) * sae.probe_dimension
 
         # Calculate epoch time
         epoch_time = time.time() - epoch_start_time
 
         # Log epoch metrics with timing
-        logger.info(f"Epoch {epoch+1:3d}/{num_epochs} | Loss: {avg_loss:7.4f} | Recon: {avg_recon:7.4f} | Active: {avg_num_active:6.0f}/{sae.encoder.out_features} ({avg_pct_active:4.1f}%) | Time: {format_time(epoch_time)}")
+        logger.info(f"Epoch {epoch+1:3d}/{num_epochs} | Loss: {avg_loss:7.4f} | Recon: {avg_recon:7.4f} | Active: {avg_num_active:6.0f}/{sae.probe_dimension} ({avg_pct_active:4.1f}%) | Time: {format_time(epoch_time)}")
 
     logger.info("="*60)
     logger.info("TRAINING COMPLETE")
@@ -418,7 +451,7 @@ def train_sae(
 # ============================================================================
 
 def save_sae(
-    sae: SparseAutoencoder,
+    sae: DeepSparseAutoencoder,
     mean: torch.Tensor,
     save_dir: str,
     model_name: str = "EleutherAI/pythia-70m",
@@ -449,8 +482,8 @@ def save_sae(
     metadata = {
         "model_name": model_name,
         "layer_idx": layer_idx,
-        "input_dim": sae.encoder.in_features,
-        "hidden_dim": sae.encoder.out_features,
+        "input_dim": sae.input_dim,
+        "probe_dim": sae.probe_dimension,
     }
     metadata_path = save_path / "metadata.json"
     with open(metadata_path, 'w') as f:
@@ -464,7 +497,11 @@ def save_sae(
 
 def load_sae(save_dir: str, device: str = "cpu"):
     """
-    Load a trained SAE from disk.
+    Load a trained Deep SAE from disk.
+
+    Note: This function currently cannot reconstruct the full architecture from metadata
+    since encoder/decoder hidden dims are not saved. This is a limitation that should
+    be addressed by updating save_sae() to include these in metadata.
 
     Args:
         save_dir: Directory where the SAE was saved
@@ -485,17 +522,18 @@ def load_sae(save_dir: str, device: str = "cpu"):
     with open(metadata_path, 'r') as f:
         metadata = json.load(f)
 
-    # Create SAE with same architecture
-    sae = SparseAutoencoder(
-        input_dim=metadata["input_dim"],
-        hidden_dim=metadata["hidden_dim"]
+    # TODO: Save encoder/decoder hidden dims in metadata to enable proper loading
+    # For now, this function won't work correctly without those dimensions
+    raise NotImplementedError(
+        "Loading Deep SAE requires encoder_hidden_dims and decoder_hidden_dims in metadata. "
+        "Please update save_sae() to save these dimensions before using load_sae()."
     )
 
     # Load weights
     weights_path = save_path / "sae_weights.pt"
-    sae.load_state_dict(torch.load(weights_path, map_location=device))
-    sae.to(device)
-    sae.eval()  # Set to evaluation mode
+    # sae.load_state_dict(torch.load(weights_path, map_location=device))
+    # sae.to(device)
+    # sae.eval()  # Set to evaluation mode
 
     # Load mean
     mean_path = save_path / "activation_mean.pt"
@@ -504,7 +542,7 @@ def load_sae(save_dir: str, device: str = "cpu"):
     print(f"✓ SAE loaded from: {save_path.absolute()}")
     print(f"  - Model: {metadata['model_name']}")
     print(f"  - Layer: {metadata['layer_idx']}")
-    print(f"  - Architecture: {metadata['input_dim']} → {metadata['hidden_dim']} → {metadata['input_dim']}")
+    print(f"  - Probe dimension: {metadata['probe_dim']}")
 
     return sae, mean, metadata
 
@@ -514,7 +552,7 @@ def load_sae(save_dir: str, device: str = "cpu"):
 # ============================================================================
 
 def analyze_features(
-    sae: SparseAutoencoder,
+    sae: DeepSparseAutoencoder,
     model,
     tokenizer,
     test_texts: List[str],
@@ -626,15 +664,25 @@ def main():
       | Gemma Scope    | Up to 64x         | 262k for 4k input  |
     """
     input_dim = activations.shape[1]
-    hidden_dim = input_dim * 32 # input_dim ** 2  # 32x wider for sparse features
+    # Input vector size input_dim
+    encoder_hidden_dims = [input_dim * 4, input_dim * 16, input_dim * 32] # 32x wider for sparse features
+    # Input vector size encoder_hidden_dims[-1]. Input vector output size input_dim
+    # ToDO: If the linear assumption is correct this list could be empty as the decoder can be a single layer.
+    #  It should to easier to arrange features back together than to decompose them.
+    decoder_hidden_dims = [input_dim * 16, input_dim * 4]
 
-    print(f"\nCreating SAE: {input_dim} -> {hidden_dim} -> {input_dim}")
+
+    print(f"\nCreating SAE: {input_dim} -> {encoder_hidden_dims} -> {decoder_hidden_dims} -> {input_dim}")
 
     # TopK configuration
     # Set TOP_K > 0 to use TopK activation (e.g., 32, 64, 128)
     # Set TOP_K = 0 to use standard ReLU with L1 penalty
-    TOP_K = 0
-    sae = SparseAutoencoder(input_dim, hidden_dim, top_k=TOP_K).to(device)
+    TOP_K = 300
+    sae = DeepSparseAutoencoder(
+        input_dim,
+        encoder_hidden_dims=encoder_hidden_dims, decoder_hidden_dims=decoder_hidden_dims,
+        top_k=TOP_K
+    ).to(device)
     layer_idx = 3
 
     # Train the SAE with sparsity annealing
@@ -669,9 +717,9 @@ def main():
     save_sae(
         sae,
         mean,
-        save_dir=f"checkpoints/pythia-70m_layer{layer_idx}_{format_number_si(hidden_dim)}",
+        save_dir=f"checkpoints/pythia-70m_layer{layer_idx}_{format_number_si(sae.probe_dimension)}",
         model_name=model_name,
-        layer_idx=layer_idx  # Middle layer
+        layer_idx=layer_idx
     )
 
     print("\n" + "="*60)
