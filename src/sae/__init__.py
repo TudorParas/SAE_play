@@ -39,18 +39,21 @@ __version__ = "0.1.0"
 from .data.loader import load_pile_samples
 from .models.simple import SimpleSAE
 from .models.deep import DeepSAE
+from .sparsity import SparsityMechanism, TopKSparsity, L1Sparsity, NoSparsity
 from .activations import extract_activations
-from .training.trainer import SAETrainer
-from .training.loop import train_sae
+from .training.train_pipeline import TrainPipeline
 from .checkpoints import save_checkpoint, load_checkpoint
 
 __all__ = [
     "load_pile_samples",
     "SimpleSAE",
     "DeepSAE",
+    "SparsityMechanism",
+    "TopKSparsity",
+    "L1Sparsity",
+    "NoSparsity",
     "extract_activations",
-    "SAETrainer",
-    "train_sae",
+    "TrainPipeline",
     "save_checkpoint",
     "load_checkpoint",
 ]

@@ -6,9 +6,9 @@ This is a baseline SAE with one encoder layer and one decoder layer.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from typing import Dict, Any
 from .base import BaseSAE
+from ..sparsity import SparsityMechanism
 
 
 class SimpleSAE(BaseSAE):
@@ -18,18 +18,21 @@ class SimpleSAE(BaseSAE):
     Architecture:
     - Encoder: Single linear layer that expands dimensions (e.g., 512 -> 2048)
     - Decoder: Single linear layer that contracts back (e.g., 2048 -> 512)
-    - Sparsity: Enforced via L1 penalty or TopK activation
+    - Sparsity: Controlled by SparsityMechanism (TopK, L1, etc.)
 
     Why overcomplete? Having more features than input dimensions (e.g., 4x expansion)
     gives space for different semantic concepts to occupy separate dimensions rather
     than being compressed together.
+
+    The forward() method is inherited from BaseSAE (template method pattern).
+    This class only defines encode() and decode().
     """
 
     def __init__(
         self,
         input_dim: int,
         hidden_dim: int,
-        top_k: int | None = 0
+        sparsity: SparsityMechanism
     ):
         """
         Initialize the simple SAE.
@@ -37,14 +40,12 @@ class SimpleSAE(BaseSAE):
         Args:
             input_dim: Dimension of input activations (e.g., 512 for Pythia-70M layer)
             hidden_dim: Dimension of sparse representation (typically 2-8x input_dim)
-            top_k: If > 0, use TopK activation (keep only top-k features per sample).
-                   If 0, use standard ReLU (sparsity via L1 penalty during training).
+            sparsity: Sparsity mechanism (TopKSparsity, L1Sparsity, etc.)
         """
-        super().__init__()
+        super().__init__(sparsity)
 
         self._input_dim = input_dim
         self._hidden_dim = hidden_dim
-        self.top_k = top_k
 
         # Learnable bias for centering inputs
         self.bias_pre = nn.Parameter(torch.zeros(input_dim))
@@ -60,65 +61,61 @@ class SimpleSAE(BaseSAE):
 
         # Initialize weights with Xavier initialization for better convergence
         nn.init.xavier_uniform_(self.encoder.weight)
-        # nn.init.zeros_(self.encoder.bias)
         nn.init.xavier_uniform_(self.decoder.weight)
-        # nn.init.zeros_(self.decoder.bias)
 
     @property
     def input_dim(self) -> int:
         return self._input_dim
 
     @property
-    def latent_dim(self) -> int:
+    def probe_dim(self) -> int:
         return self._hidden_dim
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass through the SAE.
+        Encode input to pre-activation features.
+
+        Flow: x → center → linear → add bias → pre_activation
 
         Args:
             x: Input activations, shape (batch_size, input_dim)
 
         Returns:
-            Tuple of (reconstructed, sparse_features)
+            Pre-activation features, shape (batch_size, hidden_dim)
         """
-        # Center input and encode
-        pre_activation = self.encoder(x - self.bias_pre) + self.bias_enc
+        # Center input, then encode
+        return self.encoder(x - self.bias_pre) + self.bias_enc
 
-        # Apply activation function (TopK or ReLU)
-        if self.top_k and self.top_k > 0:
-            sparse_features = self._topk_activation(F.relu(pre_activation), self.top_k)
-        else:
-            sparse_features = F.relu(pre_activation)
-
-        # Decode back to original space
-        reconstructed = self.decoder(sparse_features) + self.bias_pre
-
-        return reconstructed, sparse_features
-
-    def _topk_activation(self, x: torch.Tensor, k: int) -> torch.Tensor:
+    def decode(self, features: torch.Tensor) -> torch.Tensor:
         """
-        Keep only the top-k values per sample, zero out the rest.
+        Decode sparse features to reconstructed input.
 
-        This is differentiable - gradients flow through the selected positions.
+        Flow: sparse_features → linear → add bias → reconstruction
 
         Args:
-            x: Input tensor, shape (batch_size, hidden_dim)
-            k: Number of top values to keep per sample
+            features: Sparse features, shape (batch_size, hidden_dim)
 
         Returns:
-            Tensor with same shape, but only top-k values non-zero per row
+            Reconstructed input, shape (batch_size, input_dim)
         """
-        # Find top-k values and their indices for each sample
-        topk_values, topk_indices = torch.topk(x, k=k, dim=-1)
+        # Decode and add back the centering bias
+        return self.decoder(features) + self.bias_pre
 
-        # Create output filled with zeros
-        result = torch.zeros_like(x)
+    @torch.no_grad()
+    def anti_cheat(self):
+        """
+        Prevent decoder weight explosion via L2 column normalization.
 
-        # Scatter the top-k values back to their original positions
-        result.scatter_(-1, topk_indices, topk_values)
+        Each decoder column (feature's reconstruction direction) is normalized
+        to unit L2 norm. This prevents the model from "cheating" by growing
+        decoder weights instead of learning sparse features.
 
-        return result
+        TODO: Consider switching to spectral normalization (like DeepSAE) for
+              consistency. Spectral norm is automatic via hooks and may be more
+              principled, though L2 column norm is standard in SAE literature.
+        """
+        # Normalize decoder columns (dim=0) to unit L2 norm
+        self.decoder.weight.data[:] = torch.nn.functional.normalize(self.decoder.weight.data, p=2, dim=0)
 
     def get_config(self) -> Dict[str, Any]:
         """Get configuration for saving/loading."""
@@ -126,5 +123,5 @@ class SimpleSAE(BaseSAE):
             "type": "SimpleSAE",
             "input_dim": self._input_dim,
             "hidden_dim": self._hidden_dim,
-            "top_k": self.top_k,
+            # Note: Sparsity mechanism should be saved separately by checkpoint system
         }

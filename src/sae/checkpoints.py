@@ -111,6 +111,6 @@ def load_checkpoint(
 
     print(f"✓ Checkpoint loaded from: {save_path.absolute()}")
     print(f"  - Type: {sae_type}")
-    print(f"  - Architecture: {sae.input_dim} → {sae.latent_dim}")
+    print(f"  - Architecture: {sae.input_dim} → {sae.probe_dim}")
 
     return sae, activation_mean, config

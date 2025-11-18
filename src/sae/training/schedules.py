@@ -1,7 +1,18 @@
 """
-Schedules for training hyperparameters (sparsity penalty, learning rate, etc.).
+Schedules for training hyperparameters (EPOCH-BASED).
 
-These are simple callable objects that return a value based on the current step/epoch.
+These are simple callable objects that return a hyperparameter value based on the
+current epoch number (0, 1, 2, ...). They can be used for:
+- Sparsity penalty (L1 coefficient) annealing
+- Learning rate scheduling (epoch-based)
+- Any other hyperparameter that needs to vary during training
+
+Each schedule is a callable that takes an epoch number and returns the parameter value.
+
+For step-based learning rate scheduling, use torch.optim.lr_scheduler instead.
+
+ToDo: need to ensure that schedules designed this way offers the start / stop guarantees that are offered by the
+   torch.optim.lr_scheduler.LearningRateScheduler. Need to Checkpointing & resuming without pain
 """
 
 from abc import ABC, abstractmethod
@@ -13,10 +24,10 @@ class Schedule(ABC):
     @abstractmethod
     def __call__(self, step: int) -> float:
         """
-        Get the parameter value at a given step.
+        Get the parameter value at a given epoch.
 
         Args:
-            step: Current training step or epoch
+            step: Current training epoch (0-indexed)
 
         Returns:
             Parameter value
@@ -69,8 +80,19 @@ class WarmupThenLinearSchedule(Schedule):
     """
     Constant value during warmup, then linear interpolation.
 
-    Useful for sparsity annealing: keep penalty low initially to learn good
-    reconstruction, then gradually increase to enforce sparsity.
+    Common use cases:
+    - Learning rate: Warmup from 0 to max LR, then decay to lower LR
+    - Sparsity penalty: Keep penalty low initially to learn reconstruction,
+      then gradually increase to enforce sparsity
+
+    Example (LR schedule):
+        >>> lr_schedule = WarmupThenLinearSchedule(
+        ...     warmup_value=0.0,      # Start from 0
+        ...     end_value=1e-5,        # Decay to 1e-5
+        ...     warmup_steps=1000,     # Warmup for 1000 steps
+        ...     total_steps=100000     # Total training steps
+        ... )
+        >>> # Then multiply by base LR: lr = base_lr * lr_schedule(step)
     """
 
     def __init__(

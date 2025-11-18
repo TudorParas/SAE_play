@@ -17,9 +17,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from src.sae.data.loader import load_pile_samples
 from src.sae.activations import extract_activations
 from src.sae.models.deep import DeepSAE
-from src.sae.training.trainer import SAETrainer
-from src.sae.training.loop import train_sae
-from src.sae.training.schedules import WarmupThenLinearSchedule
+from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+from src.sae.training.train_pipeline import TrainPipeline
+from src.sae.training.schedules import WarmupThenLinearSchedule, ConstantSchedule
 from src.sae.evaluation.analyzer import analyze_features, print_feature_analysis
 from src.sae.checkpoints import save_checkpoint
 
@@ -91,37 +91,66 @@ def main():
     # Note: Final layer back to input_dim is added automatically
     decoder_hidden_dims = [input_dim * 4, input_dim * 2]
 
+    # Choose sparsity mechanism
+    # Option 1: TopK (fixed sparsity)
+    # sparsity = TopKSparsity(k=64)
+
+    # Option 2: L1 (adaptive sparsity - better for circuit discovery!)
+    sparsity = L1Sparsity()
+
+    # Option 3: JumpRELU
+    # sparsity = JumpReLUSparsity(num_features=encoder_hidden_dims[-1])
+
     sae = DeepSAE(
         input_dim=input_dim,
         encoder_hidden_dims=encoder_hidden_dims,
         decoder_hidden_dims=decoder_hidden_dims,
-        top_k=0  # TopK activation with k=64
+        sparsity=sparsity
     ).to(device)
 
     print(f"Deep SAE architecture:")
     print(f"  Encoder: {input_dim} → {' → '.join(map(str, encoder_hidden_dims))}")
     print(f"  Latent: {encoder_hidden_dims[-1]} dimensions (sparse)")
     print(f"  Decoder: {encoder_hidden_dims[-1]} → {' → '.join(map(str, decoder_hidden_dims))} → {input_dim}")
-    print(f"  Using TopK activation with k=64")
+    print(f"  Sparsity: {sparsity.__class__.__name__}")
+
+    # ========================================================================
+    # 4.5 Create Optimizer. The LR doesn't matter, we'll adjust it later at each step.
+    # ========================================================================
+    print("\n[4.5/7] Creating optimizer...")
+    # The learning rate doesn't matter, we'll adjust it later at each step.
+    optimizer = torch.optim.Adam(sae.parameters(), lr=1e-3)
+
+    print(f"SAE optimizer: {optimizer}")
 
     # ========================================================================
     # 5. Create trainer (you configure)
     # ========================================================================
     print("\n[5/7] Creating trainer...")
 
-    # Create a sparsity schedule (optional)
-    # Since we're using TopK, this won't be used, but shows how you'd do it
+    # Calculate total training steps
+    num_epochs = 20
+    samples_per_epoch = activations.shape[0]
+    batch_size = 32
+    steps_per_epoch = samples_per_epoch // batch_size
+    total_steps = num_epochs * steps_per_epoch
+
+    # Learning rate schedule: warmup then linear decay
+    # Warmup from 0 to 1.0 over 1000 steps, then decay to 0.1 by end of training
+    lr_schedule = None # ConstantSchedule(1e-3)
     sparsity_schedule = WarmupThenLinearSchedule(
-        warmup_value=1e-3,
-        end_value=1e-1,
-        warmup_steps=5,
-        total_steps=20
+        warmup_value=1e-2,
+        end_value=2.0,
+        warmup_steps=2,  # How long to have warmup value
+        total_steps=20  # Reach end value after this many steps
     )
 
-    trainer = SAETrainer(
+    train_pipeline = TrainPipeline(
         sae=sae,
-        lr=1e-3,
-        sparsity_penalty=sparsity_schedule
+        optimizer=optimizer,
+        activations=activations,
+        lr_schedule=lr_schedule,       # LR will vary based on schedule
+        sparsity_schedule=sparsity_schedule,
     )
 
     # ========================================================================
@@ -129,13 +158,10 @@ def main():
     # ========================================================================
     print("\n[6/7] Training Deep SAE...")
 
-    results = train_sae(
-        sae=sae,
-        trainer=trainer,
-        activations=activations,
-        num_epochs=20,
+    num_epochs = 20
+    results = train_pipeline.train_sae(
+        num_epochs=num_epochs,
         batch_size=32,
-        use_l1_penalty=False,  # We're using TopK, not L1
         verbose=True
     )
 

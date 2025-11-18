@@ -61,7 +61,7 @@ def analyze_features(
 
         # Pass through SAE
         with torch.no_grad():
-            _, sparse_features = sae(centered_activations)
+            reconstructed, sparse_features, pre_activation = sae(centered_activations)
 
         # Average features across all tokens in this text
         avg_features = sparse_features.mean(dim=0)
