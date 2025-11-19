@@ -11,6 +11,7 @@ Run from project root:
 """
 
 import torch
+from torch.optim import lr_scheduler
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Import library components
@@ -37,7 +38,7 @@ def main():
     print("\n[1/7] Loading data...")
     # Loader automatically finds data file relative to module location
     texts = load_pile_samples(
-        num_samples=1000,
+        num_samples=2 ** 10,
         shuffle=True
     )
     print(f"Loaded {len(texts)} texts")
@@ -85,18 +86,19 @@ def main():
 
     # Define multi-layer architecture
     # Encoder progressively expands: 512 -> 1024 -> 2048 -> 4096
-    encoder_hidden_dims = [input_dim * 2, input_dim * 4, input_dim * 8]
+    # Chosen so we have as many parameters as a single layer SAE with hidden dim 32 (1 * 4 + 4 * 7 = 32)
+    encoder_hidden_dims = [input_dim * 4, input_dim * 32]
 
     # Decoder progressively contracts: 4096 -> 2048 -> 1024 -> 512
     # Note: Final layer back to input_dim is added automatically
-    decoder_hidden_dims = [input_dim * 4, input_dim * 2]
+    decoder_hidden_dims = [input_dim * 4]
 
     # Choose sparsity mechanism
     # Option 1: TopK (fixed sparsity)
-    # sparsity = TopKSparsity(k=64)
+    sparsity = TopKSparsity(k=64)
 
     # Option 2: L1 (adaptive sparsity - better for circuit discovery!)
-    sparsity = L1Sparsity()
+    # sparsity = L1Sparsity()
 
     # Option 3: JumpRELU
     # sparsity = JumpReLUSparsity(num_features=encoder_hidden_dims[-1])
@@ -132,12 +134,21 @@ def main():
     num_epochs = 20
     samples_per_epoch = activations.shape[0]
     batch_size = 32
-    steps_per_epoch = samples_per_epoch // batch_size
+    steps_per_epoch = (samples_per_epoch + batch_size - 1) // batch_size
     total_steps = num_epochs * steps_per_epoch
 
     # Learning rate schedule: warmup then linear decay
     # Warmup from 0 to 1.0 over 1000 steps, then decay to 0.1 by end of training
-    lr_schedule = None # ConstantSchedule(1e-3)
+    # lr_schedule = None # ConstantSchedule(1e-3)
+    lr_schedule = lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=0.001,  # Your current LR
+        total_steps=total_steps,
+        pct_start=0.1,  # 10% warmup
+        anneal_strategy='cos',
+        div_factor=10,  # Start at lr/10
+        final_div_factor=10  # End at lr/100
+    )
     sparsity_schedule = WarmupThenLinearSchedule(
         warmup_value=1e-2,
         end_value=2.0,
@@ -210,7 +221,7 @@ def main():
     print("EXPERIMENT COMPLETE!")
     print("="*60)
     print("\nDeep SAE trained successfully!")
-    print(f"Architecture: {len(encoder_hidden_dims)}-layer encoder, {len(decoder_hidden_dims)}-layer decoder")
+    print(f"Architecture: {len(encoder_hidden_dims)}-layer encoder, {len(decoder_hidden_dims) + 1}-layer decoder")
     print(f"Latent dimension: {encoder_hidden_dims[-1]:,}")
     print(f"Final reconstruction loss: {results['final_metrics'].recon_loss:.4f}")
     print(f"Final sparsity: {results['final_metrics'].pct_active:.1f}% active features")

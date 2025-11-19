@@ -119,6 +119,10 @@ class TrainPipeline:
 
             self.sae.anti_cheat()
 
+        # Advance the LR schedule.
+        if self._lr_schedule is not None and isinstance(self._lr_schedule, torch.optim.lr_scheduler.LRScheduler):
+            self._lr_schedule.step()
+
         # Compute sparsity metrics
         num_active = (sparse_features > 0.01).float().sum(dim=1).mean().item()
 
@@ -201,10 +205,6 @@ class TrainPipeline:
                 # Accumulate metrics
                 epoch_metrics.update(batch_metrics)
                 num_batches += 1
-
-            # Advance the LR schedule.
-            if self._lr_schedule is not None and isinstance(self._lr_schedule, torch.optim.lr_scheduler.LRScheduler):
-                self._lr_schedule.step()
 
             # Average metrics over batches
             epoch_metrics.scale(1.0 / num_batches)

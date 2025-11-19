@@ -37,7 +37,7 @@ def main():
     print("\n[1/7] Loading data...")
     # Loader automatically finds data file relative to module location
     texts = load_pile_samples(
-        num_samples=1000,
+        num_samples=10000,
         shuffle=True
     )
     print(f"Loaded {len(texts)} texts")
@@ -86,13 +86,11 @@ def main():
 
     # Choose sparsity mechanism
     # Option 1: TopK (fixed sparsity)
-    # sparsity = TopKSparsity(k=32)
+    sparsity = TopKSparsity(k=32)
 
     # Option 2: L1 (adaptive sparsity - better for circuit discovery!)
-    sparsity = L1Sparsity()
+    # sparsity = L1Sparsity()
 
-    # Option 3: JumpRELU
-    # sparsity = JumpReLUSparsity(num_features=hidden_dim)
 
     sae = SimpleSAE(
         input_dim=input_dim,
