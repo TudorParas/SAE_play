@@ -100,7 +100,7 @@ class TrainPipeline:
         # This keeps latents in a healthy range (compatible with JumpReLU thresholds ~0.001-5.0).
         scale_penalty = torch.tensor(0.0, device=batch.device)
         if hasattr(self.sae, 'global_scale'):
-            scale_penalty = 1e-3 * (self.sae.global_scale ** 2)
+            scale_penalty = 1e-2 * (self.sae.global_scale ** 2)
 
         # Total loss
         total_loss = recon_loss + sparsity_loss + scale_penalty

@@ -95,10 +95,10 @@ def main():
 
     # Choose sparsity mechanism
     # Option 1: TopK (fixed sparsity)
-    sparsity = TopKSparsity(k=64)
+    # sparsity = TopKSparsity(k=64)
 
     # Option 2: L1 (adaptive sparsity - better for circuit discovery!)
-    # sparsity = L1Sparsity()
+    sparsity = L1Sparsity()
 
     # Option 3: JumpRELU
     # sparsity = JumpReLUSparsity(num_features=encoder_hidden_dims[-1])

@@ -544,3 +544,142 @@ Final reconstruction loss: 0.0412
 Final sparsity: 0.2% active features
 
 Process finished with exit code 0
+
+
+C:\Users\paras\miniconda3\envs\SAE\python.exe C:\Users\paras\PycharmProjects\SAE_play\src\sae\experiments\deep_sae_experiment.py
+============================================================
+DEEP SAE EXPERIMENT
+============================================================
+
+[1/7] Loading data...
+Loaded 1024 texts
+
+[2/7] Loading model...
+Using device: cuda
+
+[3/7] Extracting activations...
+Extracted activations: torch.Size([111670, 512])
+  - 111,670 token activations
+  - 512 dimensions
+
+[4/7] Creating Deep SAE...
+Deep SAE architecture:
+  Encoder: 512 → 2048 → 16384
+  Latent: 16384 dimensions (sparse)
+  Decoder: 16384 → 2048 → 512
+  Sparsity: TopKSparsity
+
+[4.5/7] Creating optimizer...
+SAE optimizer: Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0
+)
+
+[5/7] Creating trainer...
+
+[6/7] Training Deep SAE...
+
+Training SAE on 111,670 activation vectors
+Input dim: 512, Latent dim: 16384
+Batch size: 32, Epochs: 20
+============================================================
+Epoch   1/20 | Loss: 0.1234 | Recon: 0.1224 | Active: 64/16384 (0.4%) | Time: 50.13s
+Epoch   2/20 | Loss: 0.0805 | Recon: 0.0795 | Active: 64/16384 (0.4%) | Time: 54.14s
+Epoch   3/20 | Loss: 0.0592 | Recon: 0.0583 | Active: 64/16384 (0.4%) | Time: 56.28s
+Epoch   4/20 | Loss: 0.0530 | Recon: 0.0522 | Active: 64/16384 (0.4%) | Time: 53.35s
+Epoch   5/20 | Loss: 0.0484 | Recon: 0.0477 | Active: 64/16384 (0.4%) | Time: 53.56s
+Epoch   6/20 | Loss: 0.0454 | Recon: 0.0449 | Active: 64/16384 (0.4%) | Time: 55.55s
+Epoch   7/20 | Loss: 0.0438 | Recon: 0.0433 | Active: 64/16384 (0.4%) | Time: 55.35s
+Epoch   8/20 | Loss: 0.0422 | Recon: 0.0418 | Active: 64/16384 (0.4%) | Time: 54.33s
+Epoch   9/20 | Loss: 0.0410 | Recon: 0.0407 | Active: 64/16384 (0.4%) | Time: 56.08s
+Epoch  10/20 | Loss: 0.0400 | Recon: 0.0396 | Active: 64/16384 (0.4%) | Time: 56.82s
+Epoch  11/20 | Loss: 0.0392 | Recon: 0.0389 | Active: 64/16384 (0.4%) | Time: 54.83s
+Epoch  12/20 | Loss: 0.0384 | Recon: 0.0382 | Active: 64/16384 (0.4%) | Time: 53.90s
+Epoch  13/20 | Loss: 0.0378 | Recon: 0.0376 | Active: 64/16384 (0.4%) | Time: 54.86s
+Epoch  14/20 | Loss: 0.0373 | Recon: 0.0371 | Active: 64/16384 (0.4%) | Time: 54.05s
+Epoch  15/20 | Loss: 0.0368 | Recon: 0.0366 | Active: 64/16384 (0.4%) | Time: 55.27s
+Epoch  16/20 | Loss: 0.0364 | Recon: 0.0363 | Active: 64/16384 (0.4%) | Time: 54.39s
+Epoch  17/20 | Loss: 0.0361 | Recon: 0.0360 | Active: 64/16384 (0.4%) | Time: 53.48s
+Epoch  18/20 | Loss: 0.0359 | Recon: 0.0357 | Active: 64/16384 (0.4%) | Time: 55.29s
+Epoch  19/20 | Loss: 0.0357 | Recon: 0.0356 | Active: 64/16384 (0.4%) | Time: 56.86s
+Epoch  20/20 | Loss: 0.0356 | Recon: 0.0355 | Active: 64/16384 (0.4%) | Time: 56.64s
+============================================================
+Training complete!
+
+
+[7/7] Evaluating Deep SAE...
+
+============================================================
+FEATURE ANALYSIS
+============================================================
+
+Text: 'Dogs are man's best friend.'
+  Active features: 149/16384 (0.9%)
+  Top 10 features:
+    Feature 13092: 272.617
+    Feature 12441: 266.961
+    Feature 12315: 254.879
+    Feature 5603: 253.492
+    Feature 9061: 224.479
+    Feature 10253: 219.204
+    Feature 7915: 203.425
+    Feature 11872: 165.272
+    Feature 11322: 154.500
+    Feature 4023: 143.798
+
+Text: 'Neural networks process information.'
+  Active features: 128/16384 (0.8%)
+  Top 10 features:
+    Feature 13092: 495.467
+    Feature 12441: 467.829
+    Feature 5603: 423.164
+    Feature 9061: 400.580
+    Feature 12315: 392.647
+    Feature 10253: 333.114
+    Feature 13388: 319.253
+    Feature 7915: 289.497
+    Feature 11322: 202.188
+    Feature 8281: 179.745
+
+Text: 'London is a major city in England.'
+  Active features: 147/16384 (0.9%)
+  Top 10 features:
+    Feature 13092: 275.356
+    Feature 12441: 268.304
+    Feature 5603: 253.618
+    Feature 9061: 224.818
+    Feature 10253: 217.944
+    Feature 7915: 201.600
+    Feature 12315: 184.458
+    Feature 4831: 159.930
+    Feature 11872: 151.408
+    Feature 2014: 144.797
+============================================================
+
+Saving checkpoint...
+✓ Checkpoint saved to: C:\Users\paras\PycharmProjects\SAE_play\src\sae\experiments\checkpoints\deep_sae_layer3
+  - Weights: sae_weights.pt
+  - Activation mean: activation_mean.pt
+  - Config: config.json
+
+============================================================
+EXPERIMENT COMPLETE!
+============================================================
+
+Deep SAE trained successfully!
+Architecture: 2-layer encoder, 2-layer decoder
+Latent dimension: 16,384
+Final reconstruction loss: 0.0355
+Final sparsity: 0.4% active features
+
+Process finished with exit code 0
