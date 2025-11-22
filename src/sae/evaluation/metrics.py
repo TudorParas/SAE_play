@@ -3,6 +3,9 @@ Metrics for evaluating SAE quality.
 """
 
 import torch
+from typing import Dict, Any
+
+from ..models.base import BaseSAE
 
 
 def compute_reconstruction_loss(
@@ -56,4 +59,66 @@ def compute_sparsity(
         'pct_active': pct_active,
         'l0_norm': l0_norm,
         'l1_norm': l1_norm,
+    }
+
+
+def compute_dead_features(
+    sae: BaseSAE,
+    activations: torch.Tensor,
+    threshold: float = 0.01,
+    batch_size: int = 256,
+) -> Dict[str, Any]:
+    """
+    Compute fraction of features that never activate on given activations.
+
+    A "dead" feature is one that never activates above the threshold for any
+    input in the evaluation set. High dead feature fractions indicate the SAE
+    isn't using its full capacity.
+
+    Args:
+        sae: The trained SAE model
+        activations: Evaluation activations, shape (num_samples, input_dim)
+                    Should be centered (mean-subtracted) before passing.
+        threshold: Activation threshold to consider a feature "active"
+        batch_size: Batch size for processing (for memory efficiency)
+
+    Returns:
+        Dictionary with:
+            - 'count': Number of dead features
+            - 'fraction': Fraction of features that are dead
+            - 'threshold': The threshold used
+            - 'total': Total number of features in SAE
+            - 'alive_count': Number of features that activated at least once
+    """
+    device = next(sae.parameters()).device
+    num_features = sae.probe_dim
+    num_samples = activations.shape[0]
+
+    # Track which features have ever been active
+    ever_active = torch.zeros(num_features, dtype=torch.bool, device=device)
+
+    # Process in batches to avoid OOM
+    sae.eval()
+    with torch.no_grad():
+        for i in range(0, num_samples, batch_size):
+            batch = activations[i:i + batch_size].to(device)
+
+            # Get sparse features from SAE
+            _, sparse_features, _ = sae(batch)
+
+            # Mark features that are active in this batch
+            batch_active = (sparse_features > threshold).any(dim=0)
+            ever_active = ever_active | batch_active
+
+    # Count dead features
+    alive_count = ever_active.sum().item()
+    dead_count = num_features - alive_count
+    dead_fraction = dead_count / num_features
+
+    return {
+        'count': dead_count,
+        'fraction': dead_fraction,
+        'threshold': threshold,
+        'total': num_features,
+        'alive_count': alive_count,
     }

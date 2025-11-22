@@ -10,6 +10,7 @@ Run from project root:
     python -m src.sae.experiments.simple_sae_experiment
 """
 
+import time
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -20,12 +21,20 @@ from src.sae.models.simple import SimpleSAE
 from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
 from src.sae.training.train_pipeline import TrainPipeline
 from src.sae.training.schedules import WarmupThenLinearSchedule, ConstantSchedule
-from src.sae.evaluation.analyzer import analyze_features, print_feature_analysis
+from src.sae.evaluation.analyzer import analyze_features, get_spectral_stats
+from src.sae.evaluation.metrics import compute_dead_features
+from src.sae.evaluation.report import ExperimentReport, create_experiment_id
 from src.sae.checkpoints import save_checkpoint
+from src.sae.util.logging import TeeLogger
 
 
 def main():
     """Run the experiment."""
+
+    # Start capturing stdout for the report
+    logger = TeeLogger()
+    logger.start()
+    start_time = time.time()
 
     print("="*60)
     print("SIMPLE SAE EXPERIMENT")
@@ -37,7 +46,7 @@ def main():
     print("\n[1/7] Loading data...")
     # Loader automatically finds data file relative to module location
     texts = load_pile_samples(
-        num_samples=10000,
+        num_samples=1000,
         shuffle=True
     )
     print(f"Loaded {len(texts)} texts")
@@ -86,10 +95,10 @@ def main():
 
     # Choose sparsity mechanism
     # Option 1: TopK (fixed sparsity)
-    sparsity = TopKSparsity(k=32)
+    # sparsity = TopKSparsity(k=32)
 
     # Option 2: L1 (adaptive sparsity - better for circuit discovery!)
-    # sparsity = L1Sparsity()
+    sparsity = L1Sparsity()
 
 
     sae = SimpleSAE(
@@ -158,16 +167,19 @@ def main():
     )
 
     # ========================================================================
-    # 7. Evaluate
+    # 7. Evaluate and Generate Report
     # ========================================================================
-    print("\n[7/7] Evaluating SAE...")
+    print("\n[7/7] Evaluating SAE and generating report...")
 
+    # Test texts for feature analysis
     test_texts = [
         "Dogs are man's best friend.",
         "Neural networks process information.",
         "London is a major city in England.",
     ]
-
+    # ToDo: we need more data for analyzing features. We need to split our dataset into train and test. Maybe also use
+    #  a dataloader and put it in its own file?
+    # Run feature analysis
     analysis_results = analyze_features(
         sae=sae,
         model=model,
@@ -178,14 +190,43 @@ def main():
         top_k=10
     )
 
-    print_feature_analysis(analysis_results)
+    # Print feature analysis to stdout (will be captured in log)
+    print("\n" + "=" * 60)
+    print("FEATURE ANALYSIS")
+    print("=" * 60)
+    for result in analysis_results:
+        print(f"\nText: '{result['text']}'")
+        print(f"  Active features: {result['num_active']}/{result['total_features']} ({result['pct_active']:.1f}%)")
+        print(f"  Top {len(result['top_features'])} features:")
+        for idx, val in result['top_features']:
+            print(f"    Feature {idx}: {val:.3f}")
+    print("=" * 60)
+
+    # Compute dead features on training activations (centered)
+    print("\nComputing dead features...")
+    centered_activations = activations - results['activation_mean']
+    dead_features = compute_dead_features(
+        sae=sae,
+        activations=centered_activations,
+        threshold=0.01
+    )
+    print(f"Dead features: {dead_features['count']}/{dead_features['total']} ({dead_features['fraction']:.2%})")
+
+    # Compute spectral stats (ELD)
+    print("\nComputing spectral statistics...")
+    # Use a subset of activations for efficiency (10k samples max)
+    spectral_sample = centered_activations[:10000]
+    spectral_stats = get_spectral_stats(sae, spectral_sample)
+    print(f"Effective Latent Dimension (ELD): {spectral_stats['ELD']:.2f}")
+    print(f"Top Component Explained Variance: {spectral_stats['Top_Component_Explained_Var']:.2%}")
 
     # ========================================================================
     # Save checkpoint
     # ========================================================================
-    print("Saving checkpoint...")
+    checkpoint_path = f"checkpoints/simple_sae_layer{layer_idx}"
+    print(f"\nSaving checkpoint to {checkpoint_path}...")
     save_checkpoint(
-        path=f"checkpoints/simple_sae_layer{layer_idx}",
+        path=checkpoint_path,
         sae=sae,
         activation_mean=results['activation_mean'],
         metadata={
@@ -196,9 +237,78 @@ def main():
         }
     )
 
+    # ========================================================================
+    # Build and save experiment report
+    # ========================================================================
+    runtime_seconds = time.time() - start_time
+    print(f"\nTotal runtime: {runtime_seconds:.1f}s ({runtime_seconds/60:.1f} min)")
+
     print("\n" + "="*60)
     print("EXPERIMENT COMPLETE!")
     print("="*60)
+
+    # Stop logging and get captured output
+    logger.stop()
+
+    # Create experiment report
+    experiment_id = create_experiment_id("simple_sae")
+    report = ExperimentReport(
+        experiment_id=experiment_id,
+        description=f"SimpleSAE with {sparsity.__class__.__name__} on {model_name} layer {layer_idx}"
+    )
+
+    # Set metadata
+    report.set_metadata(
+        runtime_seconds=runtime_seconds,
+        device=device,
+        model_name=model_name,
+        layer_idx=layer_idx,
+        num_samples=len(texts),
+        num_tokens=activations.shape[0],
+    )
+
+    # Set training results
+    report.set_training_results(
+        final_loss=results['final_metrics'].loss,
+        final_recon_loss=results['final_metrics'].recon_loss,
+        final_sparsity_loss=results['final_metrics'].sparsity_loss,
+        final_num_active=results['final_metrics'].num_active,
+        final_pct_active=results['final_metrics'].pct_active,
+        loss_history=results['loss_history'],
+        recon_loss_history=results['recon_loss_history'],
+        sparsity_history=results['sparsity_history'],
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+    )
+
+    # Format feature analysis for report
+    feature_analysis_for_report = [
+        {
+            "text": r['text'],
+            "top_features": r['top_features'],
+            "num_active": r['num_active'],
+            "pct_active": r['pct_active'],
+        }
+        for r in analysis_results
+    ]
+
+    # Set evaluation results
+    report.set_eval_results(
+        feature_analysis=feature_analysis_for_report,
+        dead_features=dead_features,
+        spectral_stats=spectral_stats,
+        num_eval_samples=len(test_texts),
+    )
+
+    # Set artifacts
+    report.set_artifacts(checkpoint_path=checkpoint_path)
+
+    # Set captured log
+    report.set_log(logger.get_log())
+
+    # Save report
+    report_path = f"reports/{experiment_id}"
+    report.save(report_path)
 
 
 if __name__ == "__main__":

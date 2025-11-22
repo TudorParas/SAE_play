@@ -43,6 +43,9 @@ from .sparsity import SparsityMechanism, TopKSparsity, L1Sparsity, NoSparsity, B
 from .activations import extract_activations
 from .training.train_pipeline import TrainPipeline
 from .checkpoints import save_checkpoint, load_checkpoint
+from .evaluation.report import ExperimentReport, create_experiment_id
+from .evaluation.metrics import compute_dead_features
+from .util.logging import TeeLogger
 
 __all__ = [
     "load_pile_samples",
@@ -58,4 +61,8 @@ __all__ = [
     "TrainPipeline",
     "save_checkpoint",
     "load_checkpoint",
+    "ExperimentReport",
+    "create_experiment_id",
+    "compute_dead_features",
+    "TeeLogger",
 ]

@@ -54,6 +54,7 @@ class SparsityMechanism(ABC):
 
 class TopKSparsity(SparsityMechanism):
     """
+    ToDo: topk is also used in MOE. Maybe study their literature.
     TopK sparsity: Keep only top-k features per sample.
 
     Applies ReLU, then keeps only the k largest activations per sample.

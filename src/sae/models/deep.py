@@ -114,6 +114,7 @@ class DeepSAE(BaseSAE):
         layer_dims = [self._latent_dim] + self.decoder_hidden_dims + [input_dim]
         for in_dim, out_dim in zip(layer_dims[:-1], layer_dims[1:]):
             layer = nn.Linear(in_dim, out_dim, bias=False)
+            # ToDo: only apply spectral norm if deep; otherwise use anti_cheat.
             layer = nn.utils.spectral_norm(layer)  # Apply spectral normalization
             decoder_layers.append(layer)
         self.decoder_layers = nn.ModuleList(decoder_layers)
