@@ -7,7 +7,8 @@ import time
 
 import torch
 import torch.nn.functional as F
-from typing import Dict, Any, List
+from torch.utils.data import DataLoader, Dataset
+from typing import Dict, Any, List, Optional, Union
 
 from src.sae.training.schedules import Schedule, ConstantSchedule
 from src.sae.models.base import BaseSAE
@@ -19,39 +20,86 @@ class TrainPipeline:
         self,
         sae: BaseSAE,
         optimizer: torch.optim.Optimizer,
-        activations: torch.Tensor,
-        lr_schedule: Schedule | torch.optim.lr_scheduler.LRScheduler | None = None,
-        sparsity_schedule: Schedule | None = None,
+        activations: Optional[torch.Tensor] = None,
+        train_loader: Optional[DataLoader] = None,
+        activation_mean: Optional[torch.Tensor] = None,
+        lr_schedule: Optional[Union[Schedule, torch.optim.lr_scheduler.LRScheduler]] = None,
+        sparsity_schedule: Optional[Schedule] = None,
     ):
         """
         Train a Sparse Autoencoder on collected activations.
 
         This is the main training loop that:
-        1. Centers the activations (subtracts mean)
+        1. Centers the activations (subtracts mean) - if using raw tensor
         2. Runs training epochs with batching
         3. Tracks metrics
         4. Returns results
 
+        Two modes of operation:
+        1. Legacy mode (activations tensor): Pass raw activations, pipeline handles centering
+        2. DataLoader mode (train_loader): Pass pre-centered DataLoader from ActivationDataset
+
         Args:
             sae: The SAE model to train
             optimizer: The optimizer to use for training
-            activations: Tensor of activations, shape (num_samples, input_dim)
+            activations: [LEGACY] Tensor of activations, shape (num_samples, input_dim).
+                         Will be centered automatically. Use train_loader instead for new code.
+            train_loader: [PREFERRED] DataLoader from ActivationDataset (already centered).
+            activation_mean: Mean tensor for centering. Required if train_loader is used.
+                            Should be computed from TRAIN data only to avoid data leakage.
             lr_schedule: Learning rate schedule. Three options:
                 - None: Use the optimizer's initial learning rate (no scheduling).
                 - Schedule: Custom epoch-based schedule (calls schedule(epoch)).
                 - torch.optim.lr_scheduler.LRScheduler: PyTorch scheduler (calls scheduler.step()).
             sparsity_schedule: Schedule for sparsity penalty coefficient (epoch-based).
                 If None, uses constant coefficient of 1.0.
+
+        Example (DataLoader mode - preferred):
+            >>> train_raw, test_raw = split_activations(activations, train_frac=0.9)
+            >>> train_mean = train_raw.mean(dim=0, keepdim=True)
+            >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
+            >>> train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+            >>> pipeline = TrainPipeline(
+            ...     sae=sae,
+            ...     optimizer=optimizer,
+            ...     train_loader=train_loader,
+            ...     activation_mean=train_mean,
+            ... )
         """
         self.sae = sae
         self.optimizer = optimizer
-        device = next(sae.parameters()).device
-        # Data
-        # ToDo: instead of passing in activations we should pass in a DataLoader.
-        self.activation_mean, _centered_activations = self._center_activations(activations)
-        self._centered_activations = _centered_activations.to(device)
-        self._num_samples = self._centered_activations.shape[0]
-        # Schedules. Don't change whilst running
+        self._device = next(sae.parameters()).device
+
+        # Validate inputs
+        if activations is None and train_loader is None:
+            raise ValueError("Either 'activations' or 'train_loader' must be provided")
+        if activations is not None and train_loader is not None:
+            raise ValueError("Provide either 'activations' or 'train_loader', not both")
+
+        # Mode 1: Legacy tensor mode
+        if activations is not None:
+            self.activation_mean, _centered_activations = self._center_activations(activations)
+            self._centered_activations = _centered_activations.to(self._device)
+            self._num_samples = self._centered_activations.shape[0]
+            self._train_loader = None
+            self._use_dataloader = False
+
+        # Mode 2: DataLoader mode
+        else:
+            self._train_loader = train_loader
+            self._centered_activations = None
+            self._num_samples = len(train_loader.dataset)
+            self._use_dataloader = True
+
+            # Require activation mean for DataLoader mode
+            if activation_mean is None:
+                raise ValueError(
+                    "activation_mean is required when using DataLoader mode. "
+                    "Compute it from your training data before creating datasets."
+                )
+            self.activation_mean = activation_mean
+
+        # Schedules
         self._lr_schedule = lr_schedule
         if sparsity_schedule is None:
             sparsity_schedule = ConstantSchedule(1.0)
@@ -61,7 +109,6 @@ class TrainPipeline:
         """Center activations (subtract mean) before training."""
         activation_mean = activations.mean(dim=0, keepdim=True)
         centered_activations = activations - activation_mean
-        # ToDo: also make stddev 1?
         return activation_mean, centered_activations
 
     def train_step(
@@ -147,7 +194,7 @@ class TrainPipeline:
 
         Args:
             num_epochs: Number of training epochs
-            batch_size: Batch size for training
+            batch_size: Batch size for training (ignored if using DataLoader mode)
             verbose: Whether to print progress
 
         Returns:
@@ -162,11 +209,17 @@ class TrainPipeline:
             Sparsity is controlled by the SAE's sparsity mechanism (sae.sparsity).
             Configure it when creating the SAE (TopKSparsity, L1Sparsity, etc.).
         """
+        # Determine effective batch size
+        if self._use_dataloader:
+            effective_batch_size = self._train_loader.batch_size
+        else:
+            effective_batch_size = batch_size
 
         if verbose:
-            print(f"\nTraining SAE on {self._num_samples:,} activation vectors")
+            mode_str = "DataLoader" if self._use_dataloader else "tensor"
+            print(f"\nTraining SAE on {self._num_samples:,} activation vectors ({mode_str} mode)")
             print(f"Input dim: {self.sae.input_dim}, Latent dim: {self.sae.probe_dim}")
-            print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
+            print(f"Batch size: {effective_batch_size}, Epochs: {num_epochs}")
             print("=" * 60)
 
         # Track metrics over time
@@ -177,12 +230,11 @@ class TrainPipeline:
         # Training loop
         for epoch in range(num_epochs):
             epoch_start_time = time.time()
-            # Shuffle data each epoch
-            perm = torch.randperm(self._num_samples)
 
             # Initialize epoch metrics
             epoch_metrics = TrainMetrics()
             num_batches = 0
+
             # Sparsity penalty and learning rate multiplier
             sparsity_penalty = self._sparsity_schedule(epoch)
             if self._lr_schedule is not None and isinstance(self._lr_schedule, Schedule):
@@ -190,21 +242,36 @@ class TrainPipeline:
             else:
                 current_lr = None
 
-            # Batch iteration
-            for i in range(0, self._num_samples, batch_size):
-                batch_indices = perm[i:i + batch_size]
-                batch = self._centered_activations[batch_indices]
+            # Batch iteration - different for DataLoader vs tensor mode
+            if self._use_dataloader:
+                # DataLoader mode: iterate over DataLoader
+                for batch in self._train_loader:
+                    batch = batch.to(self._device)
 
-                # Training step (sparsity now handled by sae.sparsity)
-                batch_metrics = self.train_step(
-                    batch,
-                    sparsity_penalty=sparsity_penalty,
-                    current_lr=current_lr,
-                )
+                    batch_metrics = self.train_step(
+                        batch,
+                        sparsity_penalty=sparsity_penalty,
+                        current_lr=current_lr,
+                    )
 
-                # Accumulate metrics
-                epoch_metrics.update(batch_metrics)
-                num_batches += 1
+                    epoch_metrics.update(batch_metrics)
+                    num_batches += 1
+            else:
+                # Legacy tensor mode: manual batching with shuffle
+                perm = torch.randperm(self._num_samples)
+
+                for i in range(0, self._num_samples, batch_size):
+                    batch_indices = perm[i:i + batch_size]
+                    batch = self._centered_activations[batch_indices]
+
+                    batch_metrics = self.train_step(
+                        batch,
+                        sparsity_penalty=sparsity_penalty,
+                        current_lr=current_lr,
+                    )
+
+                    epoch_metrics.update(batch_metrics)
+                    num_batches += 1
 
             # Average metrics over batches
             epoch_metrics.scale(1.0 / num_batches)

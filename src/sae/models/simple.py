@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from typing import Dict, Any
 from .base import BaseSAE
-from ..sparsity import SparsityMechanism
+from ..sparsity import SparsityMechanism, TopKSparsity, L1Sparsity
 
 
 class SimpleSAE(BaseSAE):
@@ -32,7 +32,7 @@ class SimpleSAE(BaseSAE):
         self,
         input_dim: int,
         hidden_dim: int,
-        sparsity: SparsityMechanism
+        sparsity: SparsityMechanism,
     ):
         """
         Initialize the simple SAE.
@@ -54,7 +54,11 @@ class SimpleSAE(BaseSAE):
         self.encoder = nn.Linear(input_dim, hidden_dim, bias=False)
 
         # Learnable bias for encoder output
-        self.bias_enc = nn.Parameter(torch.zeros(hidden_dim))
+        if isinstance(sparsity, L1Sparsity):
+            self.bias_enc = nn.Parameter(torch.zeros(hidden_dim))
+        else:
+            # TopK sparsity does not need a separate bias.
+            self.bias_enc = None
 
         # Decoder: reconstructs original activations from sparse features
         self.decoder = nn.Linear(hidden_dim, input_dim, bias=False)
@@ -83,8 +87,12 @@ class SimpleSAE(BaseSAE):
         Returns:
             Pre-activation features, shape (batch_size, hidden_dim)
         """
-        # Center input, then encode
-        return self.encoder(x - self.bias_pre) + self.bias_enc
+        # Apply bias_pre, then encode
+        encoded = self.encoder(x - self.bias_pre)
+        if self.bias_enc is not None:
+            encoded = encoded + self.bias_enc
+
+        return  encoded
 
     def decode(self, features: torch.Tensor) -> torch.Tensor:
         """

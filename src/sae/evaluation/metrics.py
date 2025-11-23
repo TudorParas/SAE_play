@@ -122,3 +122,68 @@ def compute_dead_features(
         'total': num_features,
         'alive_count': alive_count,
     }
+
+
+def get_spectral_stats(sae_model, activation_batch):
+    r"""
+    Computes the Effective Latent Dimension (ELD) based on the spectral properties
+    of the SAE feature activations.
+
+    The ELD measures the effective number of independent dimensions being used
+    by the features. It is calculated using the Participation Ratio of the
+    covariance eigenvalues.
+
+    Maths
+    -----
+    Given eigenvalues λ of the covariance matrix, ELD is defined as:
+
+           (Σ λ_i)²
+    ELD = ──────────
+            Σ (λ_i²)
+
+    Interpretation
+    --------------
+    * Low ELD (≈ 1.0): The SAE has collapsed into a single dominant feature.
+    * High ELD: The SAE is utilizing many distinct, independent directions.
+
+    Args:
+        sae_model: The trained SAE model.
+        activation_batch: Tensor of shape [batch, d_model].
+
+    Returns:
+        dict: Contains 'ELD' and 'Top_Component_Explained_Var'.
+    """
+    # 1. Get Feature Activations (f(x))
+    # Don't decode; we want to check the "code" itself.
+    with torch.no_grad():
+        # For Simple SAE: encoder(x)
+        # For Deep SAE: encoder(x)
+        feature_acts = sae_model.encode(activation_batch)  # [Batch, d_sae]
+
+    # 2. Center the data
+    feature_acts = feature_acts - feature_acts.mean(dim=0)
+
+    # 3. Compute Singular Values (S) using SVD
+    # We use SVD on the data matrix because it's numerically more stable
+    # than eig(Covariance). eigenvalues = S**2 / (N-1)
+    _, S, _ = torch.linalg.svd(feature_acts, full_matrices=False)
+
+    # Convert singular values to eigenvalues of the covariance matrix
+    eigenvalues = (S ** 2) / (feature_acts.shape[0] - 1)
+
+    # 4. Calculate Metrics
+
+    # A. Effective Latent Dimension (The "Tudor Metric")
+    # Higher is better (implies more distinct features are being used)
+    sum_eigen = torch.sum(eigenvalues)
+    sum_sq_eigen = torch.sum(eigenvalues ** 2)
+    eld = (sum_eigen ** 2) / sum_sq_eigen
+
+    # B. Explained Variance of Top Component
+    # Lower is better (implies no single "super feature" dominates)
+    top_component_dominance = eigenvalues[0] / sum_eigen
+
+    return {
+        "ELD": eld.item(),
+        "Top_Component_Explained_Var": top_component_dominance.item()
+    }

@@ -310,6 +310,22 @@ class ExperimentReport:
             md.append("## Evaluation Results")
             md.append("")
 
+            # Test set reconstruction loss
+            recon_loss = self._eval_results.get("reconstruction_loss")
+            if recon_loss is not None:
+                md.append(f"**Test Reconstruction Loss:** {recon_loss:.6f}")
+                md.append("")
+
+            # Sparsity metrics
+            sparsity = self._eval_results.get("sparsity_metrics", {})
+            if sparsity:
+                md.append("### Sparsity Metrics (Test Set)")
+                md.append("")
+                md.append(f"- **Avg Active Features:** {sparsity.get('num_active', 0):.1f} ({sparsity.get('pct_active', 0):.2f}%)")
+                md.append(f"- **L0 Norm:** {sparsity.get('l0_norm', 0):.1f}")
+                md.append(f"- **L1 Norm:** {sparsity.get('l1_norm', 0):.2f}")
+                md.append("")
+
             # Dead features
             dead = self._eval_results.get("dead_features", {})
             if dead:
