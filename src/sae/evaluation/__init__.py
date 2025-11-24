@@ -9,7 +9,7 @@ from .metrics import (
     get_spectral_stats,
 )
 from .analyzer import analyze_features, print_feature_analysis
-from .report import ExperimentReport, create_experiment_id
+from .report import ExperimentReport
 from .evaluator import Evaluator, EvalConfig, EvalResults, AnalysisResults
 
 __all__ = [
@@ -28,5 +28,4 @@ __all__ = [
     "print_feature_analysis",
     # Report
     "ExperimentReport",
-    "create_experiment_id",
 ]

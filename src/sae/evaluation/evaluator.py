@@ -33,7 +33,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from ..models.base import BaseSAE
 from ..activations import extract_activations
-from .report import ExperimentReport, create_experiment_id
+from .report import ExperimentReport
 
 
 @dataclass
@@ -339,6 +339,7 @@ class Evaluator:
     def generate_report(
         self,
         experiment_id: str,
+        timestamp: str,
         description: str = "",
         training_results: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -355,6 +356,7 @@ class Evaluator:
 
         Args:
             experiment_id: Unique experiment identifier
+            timestamp: Timestamp string in format YYYYMMDD_HHMMSS
             description: Human-readable description
             training_results: Results from training (loss_history, final_metrics, etc.)
             metadata: Experiment metadata (device, runtime, etc.)
@@ -371,6 +373,7 @@ class Evaluator:
         # Create report
         report = ExperimentReport(
             experiment_id=experiment_id,
+            timestamp=timestamp,
             description=description,
         )
 

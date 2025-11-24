@@ -55,6 +55,7 @@ class ExperimentReport:
     def __init__(
         self,
         experiment_id: str,
+        timestamp: str,
         description: str = "",
     ):
         """
@@ -66,7 +67,7 @@ class ExperimentReport:
         """
         self.experiment_id = experiment_id
         self.description = description
-        self.timestamp = datetime.now().isoformat()
+        self.timestamp = timestamp
 
         # Initialize data sections
         self._metadata: Dict[str, Any] = {}
@@ -429,20 +430,3 @@ class ExperimentReport:
                     report._log = f.read()
 
         return report
-
-
-def create_experiment_id(prefix: str = "exp") -> str:
-    """
-    Generate a unique experiment ID.
-
-    Format: {prefix}_{YYYYMMDD}_{HHMMSS}
-    Example: exp_20241119_143025
-
-    Args:
-        prefix: Prefix for experiment ID
-
-    Returns:
-        Unique experiment ID string
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{prefix}_{timestamp}"

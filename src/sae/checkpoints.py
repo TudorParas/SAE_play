@@ -5,7 +5,8 @@ Checkpoint management for saving and loading trained SAEs.
 import torch
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
+from dataclasses import asdict
 from .models.base import BaseSAE
 from .models.simple import SimpleSAE
 from .models.deep import DeepSAE
@@ -15,7 +16,8 @@ def save_checkpoint(
     path: str,
     sae: BaseSAE,
     activation_mean: torch.Tensor,
-    metadata: Dict[str, Any] = None
+    experiment_config: Any = None,
+    final_loss: Optional[float] = None,
 ):
     """
     Save a trained SAE to disk.
@@ -24,7 +26,8 @@ def save_checkpoint(
         path: Directory path to save checkpoint (will be created if doesn't exist)
         sae: Trained SAE model
         activation_mean: Mean of training activations (needed for inference)
-        metadata: Optional metadata to save (e.g., training info, model name, layer)
+        experiment_config: Full experiment configuration (SAEExperimentConfig)
+        final_loss: Final training loss
     """
     save_path = Path(path)
     save_path.mkdir(parents=True, exist_ok=True)
@@ -37,14 +40,20 @@ def save_checkpoint(
     mean_path = save_path / "activation_mean.pt"
     torch.save(activation_mean, mean_path)
 
-    # Save configuration and metadata
-    config = sae.get_config()
-    if metadata is not None:
-        config.update(metadata)
+    # Save full experiment config
+    if experiment_config is not None:
+        config_dict = asdict(experiment_config)
+        # Add runtime info
+        config_dict['final_loss'] = final_loss
+        config_dict['input_dim'] = sae.input_dim
+        config_dict['probe_dim'] = sae.probe_dim
+    else:
+        # Fallback if no experiment config provided
+        config_dict = sae.get_config()
 
     config_path = save_path / "config.json"
     with open(config_path, 'w') as f:
-        json.dump(config, f, indent=2)
+        json.dump(config_dict, f, indent=2)
 
     print(f"✓ Checkpoint saved to: {save_path.absolute()}")
     print(f"  - Weights: {weights_path.name}")
@@ -80,24 +89,48 @@ def load_checkpoint(
     with open(config_path, 'r') as f:
         config = json.load(f)
 
-    # Instantiate the correct SAE type
-    sae_type = config.get('type', 'SimpleSAE')
+    # Load from nested config format
+    input_dim = config['input_dim']
+    sae_config = config['sae']
 
-    if sae_type == 'SimpleSAE':
-        sae = SimpleSAE(
-            input_dim=config['input_dim'],
-            hidden_dim=config['hidden_dim'],
-            top_k=config.get('top_k', 0)
-        )
-    elif sae_type == 'DeepSAE':
-        sae = DeepSAE(
-            input_dim=config['input_dim'],
-            encoder_hidden_dims=config['encoder_hidden_dims'],
-            decoder_hidden_dims=config.get('decoder_hidden_dims'),
-            top_k=config.get('top_k', 0)
-        )
+    # Determine SAE type from nested config
+    if 'hidden_dim_multiplier' in sae_config:
+        # SimpleSAE
+        hidden_dim = input_dim * sae_config['hidden_dim_multiplier']
+        from .sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+
+        # Create sparsity mechanism
+        sparsity_type = sae_config.get('sparsity_type', 'topk')
+        if sparsity_type == 'topk':
+            sparsity = TopKSparsity(k=sae_config.get('sparsity_k', 128))
+        elif sparsity_type == 'l1':
+            sparsity = L1Sparsity()
+        else:
+            sparsity = JumpReLUSparsity(num_features=hidden_dim)
+
+        sae = SimpleSAE(input_dim=input_dim, hidden_dim=hidden_dim, sparsity=sparsity)
+        sae_type = "SimpleSAE"
     else:
-        raise ValueError(f"Unknown SAE type: {sae_type}")
+        # DeepSAE
+        encoder_hidden_dims = [input_dim * m for m in sae_config['encoder_hidden_dims']]
+        decoder_hidden_dims = [input_dim * m for m in sae_config['decoder_hidden_dims']]
+
+        from .sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+        sparsity_type = sae_config.get('sparsity_type', 'l1')
+        if sparsity_type == 'topk':
+            sparsity = TopKSparsity(k=sae_config.get('sparsity_k', 64))
+        elif sparsity_type == 'l1':
+            sparsity = L1Sparsity()
+        else:
+            sparsity = JumpReLUSparsity(num_features=encoder_hidden_dims[-1])
+
+        sae = DeepSAE(
+            input_dim=input_dim,
+            encoder_hidden_dims=encoder_hidden_dims,
+            decoder_hidden_dims=decoder_hidden_dims,
+            sparsity=sparsity
+        )
+        sae_type = "DeepSAE"
 
     # Load weights
     weights_path = save_path / "sae_weights.pt"
