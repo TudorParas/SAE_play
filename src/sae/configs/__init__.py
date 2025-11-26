@@ -19,6 +19,7 @@ from .data import DataConfig
 from .sae import SimpleSAEConfig, DeepSAEConfig
 from .training import TrainingConfig
 from .experiment import SAEExperimentConfig
+from .lr_schedule import LRScheduleConfig, OneCycleLRConfig
 from .baselines import SIMPLE_SAE, DEEP_SAE
 
 __all__ = [
@@ -29,6 +30,9 @@ __all__ = [
     "DeepSAEConfig",
     "TrainingConfig",
     "SAEExperimentConfig",
+    # LR schedule configs
+    "LRScheduleConfig",
+    "OneCycleLRConfig",
     # Baseline configs
     "SIMPLE_SAE",
     "DEEP_SAE",

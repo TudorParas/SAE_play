@@ -5,7 +5,7 @@ Defines SimpleSAE and DeepSAE architectures with their sparsity mechanisms.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Literal, List, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.sae.models.base import BaseSAE
@@ -24,10 +24,10 @@ class SimpleSAEConfig:
         sparsity_coefficient: L1 penalty coefficient (for L1 sparsity)
     """
 
-    hidden_dim_multiplier: int = 32
-    sparsity_type: Literal["topk", "l1", "jumprelu"] = "topk"
-    sparsity_k: Optional[int] = 128
-    sparsity_coefficient: Optional[float] = None
+    hidden_dim_multiplier: int
+    sparsity_type: Literal["topk", "l1", "jumprelu"]
+    sparsity_k: int | None = None
+    sparsity_coefficient: float | None = None
 
     def resolve(self, input_dim: int, device: str) -> "BaseSAE":
         """
@@ -80,11 +80,11 @@ class DeepSAEConfig:
         sparsity_coefficient: L1 penalty coefficient (for L1 sparsity)
     """
 
-    encoder_hidden_dims: List[int] = field(default_factory=lambda: [4, 32])
-    decoder_hidden_dims: List[int] = field(default_factory=lambda: [4])
-    sparsity_type: Literal["topk", "l1", "jumprelu"] = "l1"
-    sparsity_k: Optional[int] = None
-    sparsity_coefficient: Optional[float] = None
+    encoder_hidden_dims: list[int]
+    decoder_hidden_dims: list[int]
+    sparsity_type: Literal["topk", "l1", "jumprelu"]
+    sparsity_k: int | None = None
+    sparsity_coefficient: float | None = None
 
     def resolve(self, input_dim: int, device: str) -> "BaseSAE":
         """

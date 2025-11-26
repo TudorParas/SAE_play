@@ -5,7 +5,7 @@ Defines which language model to use and where to extract activations from.
 """
 
 from dataclasses import dataclass
-from typing import Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from transformers import PreTrainedModel, PreTrainedTokenizer
@@ -21,10 +21,10 @@ class ModelConfig:
         layer_idx: Which transformer layer to extract activations from
     """
 
-    name: str = "EleutherAI/pythia-70m"
-    layer_idx: int = 3
+    name: str
+    layer_idx: int
 
-    def resolve(self) -> Tuple["PreTrainedModel", "PreTrainedTokenizer", str]:
+    def resolve(self) -> tuple["PreTrainedModel", "PreTrainedTokenizer", str]:
         """
         Load and return the configured model.
 

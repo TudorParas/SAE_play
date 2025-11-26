@@ -4,11 +4,11 @@ Training loop for SAEs.
 This is the thin "pipeline" layer that coordinates training.
 """
 import time
+from contextlib import ExitStack
 
 import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
-from typing import Dict, Any, List, Optional, Union
+from torch.utils.data import DataLoader
+from typing import Dict, Any, Optional, Union
 
 from src.sae.training.schedules import Schedule, ConstantSchedule
 from src.sae.models.base import BaseSAE
@@ -20,11 +20,11 @@ class TrainPipeline:
         self,
         sae: BaseSAE,
         optimizer: torch.optim.Optimizer,
-        activations: Optional[torch.Tensor] = None,
-        train_loader: Optional[DataLoader] = None,
+        train_loader: DataLoader,
         activation_mean: Optional[torch.Tensor] = None,
         lr_schedule: Optional[Union[Schedule, torch.optim.lr_scheduler.LRScheduler]] = None,
         sparsity_schedule: Optional[Schedule] = None,
+        use_amp: bool = False,
     ):
         """
         Train a Sparse Autoencoder on collected activations.
@@ -42,8 +42,6 @@ class TrainPipeline:
         Args:
             sae: The SAE model to train
             optimizer: The optimizer to use for training
-            activations: [LEGACY] Tensor of activations, shape (num_samples, input_dim).
-                         Will be centered automatically. Use train_loader instead for new code.
             train_loader: [PREFERRED] DataLoader from ActivationDataset (already centered).
             activation_mean: Mean tensor for centering. Required if train_loader is used.
                             Should be computed from TRAIN data only to avoid data leakage.
@@ -53,6 +51,8 @@ class TrainPipeline:
                 - torch.optim.lr_scheduler.LRScheduler: PyTorch scheduler (calls scheduler.step()).
             sparsity_schedule: Schedule for sparsity penalty coefficient (epoch-based).
                 If None, uses constant coefficient of 1.0.
+            use_amp: Use automatic mixed precision training with bfloat16.
+                Speeds up training on modern GPUs with minimal accuracy impact.
 
         Example (DataLoader mode - preferred):
             >>> train_raw, test_raw = split_activations(activations, train_frac=0.9)
@@ -70,34 +70,18 @@ class TrainPipeline:
         self.optimizer = optimizer
         self._device = next(sae.parameters()).device
 
-        # Validate inputs
-        if activations is None and train_loader is None:
-            raise ValueError("Either 'activations' or 'train_loader' must be provided")
-        if activations is not None and train_loader is not None:
-            raise ValueError("Provide either 'activations' or 'train_loader', not both")
+        self._train_loader = train_loader
+        self._centered_activations = None
+        self._num_samples = len(train_loader.dataset)
+        self._use_dataloader = True
 
-        # Mode 1: Legacy tensor mode
-        if activations is not None:
-            self.activation_mean, _centered_activations = self._center_activations(activations)
-            self._centered_activations = _centered_activations.to(self._device)
-            self._num_samples = self._centered_activations.shape[0]
-            self._train_loader = None
-            self._use_dataloader = False
-
-        # Mode 2: DataLoader mode
-        else:
-            self._train_loader = train_loader
-            self._centered_activations = None
-            self._num_samples = len(train_loader.dataset)
-            self._use_dataloader = True
-
-            # Require activation mean for DataLoader mode
-            if activation_mean is None:
-                raise ValueError(
-                    "activation_mean is required when using DataLoader mode. "
-                    "Compute it from your training data before creating datasets."
-                )
-            self.activation_mean = activation_mean
+        # Require activation mean for DataLoader mode
+        if activation_mean is None:
+            raise ValueError(
+                "activation_mean is required when using DataLoader mode. "
+                "Compute it from your training data before creating datasets."
+            )
+        self.activation_mean = activation_mean
 
         # Schedules
         self._lr_schedule = lr_schedule
@@ -105,11 +89,8 @@ class TrainPipeline:
             sparsity_schedule = ConstantSchedule(1.0)
         self._sparsity_schedule = sparsity_schedule
 
-    def _center_activations(self, activations: torch.Tensor):
-        """Center activations (subtract mean) before training."""
-        activation_mean = activations.mean(dim=0, keepdim=True)
-        centered_activations = activations - activation_mean
-        return activation_mean, centered_activations
+        # AMP setup (always use bfloat16 when enabled)
+        self._amp_dtype = torch.bfloat16 if use_amp else None
 
     def train_step(
             self,
@@ -132,27 +113,29 @@ class TrainPipeline:
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = current_lr
 
+        # Forward pass (with AMP if enabled)
+        with ExitStack() as exit_stack:
+            if self._amp_dtype is not None:
+                exit_stack.enter_context(torch.amp.autocast(enabled=True, dtype=self._amp_dtype, device_type='cuda'))
+            reconstructed, sparse_features, pre_activation = self.sae(batch)
 
-        # Forward pass
-        reconstructed, sparse_features, pre_activation = self.sae(batch)
+            # Reconstruction loss (MSE)
+            recon_loss = torch.nn.functional.mse_loss(reconstructed, batch)
 
-        # Reconstruction loss (MSE)
-        recon_loss = torch.nn.functional.mse_loss(reconstructed, batch)
+            # Sparsity penalty (computed by sparsity mechanism)
+            sparsity_loss = sparsity_penalty * self.sae.sparsity.compute_penalty(pre_activation)
 
-        # Sparsity penalty (computed by sparsity mechanism)
-        sparsity_loss = sparsity_penalty * self.sae.sparsity.compute_penalty(pre_activation)
+            # Global scale regularization (for DeepSAE with spectral norm)
+            # Penalize absurdly large global_scale to prevent the "tiny latents, huge scale" cheat.
+            # This keeps latents in a healthy range (compatible with JumpReLU thresholds ~0.001-5.0).
+            scale_penalty = torch.tensor(0.0, device=batch.device)
+            if hasattr(self.sae, 'global_scale'):
+                scale_penalty = 1e-2 * (self.sae.global_scale ** 2)
 
-        # Global scale regularization (for DeepSAE with spectral norm)
-        # Penalize absurdly large global_scale to prevent the "tiny latents, huge scale" cheat.
-        # This keeps latents in a healthy range (compatible with JumpReLU thresholds ~0.001-5.0).
-        scale_penalty = torch.tensor(0.0, device=batch.device)
-        if hasattr(self.sae, 'global_scale'):
-            scale_penalty = 1e-2 * (self.sae.global_scale ** 2)
+            # Total loss
+            total_loss = recon_loss + sparsity_loss + scale_penalty
 
-        # Total loss
-        total_loss = recon_loss + sparsity_loss + scale_penalty
-
-        # Backward pass
+        # Backward pass (no gradient scaling needed for bfloat16)
         self.optimizer.zero_grad()
         total_loss.backward()
         self.optimizer.step()

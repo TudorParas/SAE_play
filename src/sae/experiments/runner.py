@@ -12,7 +12,6 @@ from datetime import datetime
 
 import torch
 from dataclasses import asdict
-from typing import Callable
 
 from src.sae.configs import SAEExperimentConfig, SimpleSAEConfig, DeepSAEConfig
 from src.sae.data import load_pile_samples, create_dataloader
@@ -50,24 +49,23 @@ def get_project_name(file_path: str) -> str:
     return filename.split("_", 1)[0]
 
 
-def get_experiment_name(func: Callable) -> str:
+def get_experiment_name() -> str:
     """
-    Extract experiment name from function.
+    Extract experiment name from the calling function.
 
-    Simply returns the function's __name__ attribute, which is the experiment name.
-
-    Args:
-        func: The experiment function
+    Uses stack introspection to automatically determine the function name,
+    making experiments easier to copy-paste.
 
     Returns:
         Function name as experiment identifier
 
     Example:
-        >>> def simple_sae_fast(): pass
-        >>> get_experiment_name(simple_sae_fast)
-        'simple_sae_fast'
+        >>> def simple_sae_fast():
+        ...     name = get_experiment_name()  # Returns "simple_sae_fast"
     """
-    return func.__name__
+    # Get the caller's frame (1 level up from this function)
+    caller_frame = inspect.stack()[1]
+    return caller_frame.function
 
 
 def run_sae_experiment(config: SAEExperimentConfig) -> dict:
@@ -149,6 +147,11 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
 
     print(f"Sparsity: {sae.sparsity.__class__.__name__}")
 
+    # Apply torch.compile if enabled
+    if config.training.use_compile:
+        print("Compiling model with torch.compile...")
+        sae = torch.compile(sae)
+
     # ========================================================================
     # 4. Train
     # ========================================================================
@@ -158,6 +161,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         batch_size=config.data.training_batch_size,
         shuffle=True,
         pin_memory=True,
+        num_workers=config.data.num_workers,
     )
     print(f"Train DataLoader: {len(train_loader)} batches of size {config.data.training_batch_size}")
 
@@ -165,8 +169,11 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
 
     # Create learning rate schedule
     steps_per_epoch = len(train_loader)
-    total_steps = config.training.num_epochs * steps_per_epoch
-    lr_sched = config.training.resolve_lr_schedule(optimizer, total_steps)
+    lr_sched = None
+    if config.training.lr_schedule is not None:
+        lr_sched = config.training.lr_schedule.resolve(
+            optimizer, config.training.num_epochs, steps_per_epoch
+        )
 
     # Create sparsity schedule
     sparsity_schedule = WarmupThenLinearSchedule(
@@ -183,6 +190,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         activation_mean=activation_mean,
         lr_schedule=lr_sched,
         sparsity_schedule=sparsity_schedule,
+        use_amp=config.training.use_amp,
     )
 
     torch.manual_seed(config.training.random_seed)
