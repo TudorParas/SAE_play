@@ -38,13 +38,6 @@ def extract_activations(
     Returns:
         Tensor of activations with shape (total_tokens, hidden_dim)
         where total_tokens is the sum of all real (non-padding) tokens across all texts
-
-    Example:
-        >>> model = AutoModelForCausalLM.from_pretrained("pythia-70m")
-        >>> tokenizer = AutoTokenizer.from_pretrained("pythia-70m")
-        >>> texts = ["Hello world", "How are you?"]
-        >>> activations = extract_activations(model, tokenizer, texts, layer_idx=3)
-        >>> print(activations.shape)  # (total_tokens, hidden_dim)
     """
     # Auto-detect number of layers and choose middle layer if not specified
     num_layers = model.config.num_hidden_layers

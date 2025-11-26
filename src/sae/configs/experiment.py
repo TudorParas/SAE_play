@@ -19,15 +19,7 @@ class SAEExperimentConfig:
     Complete configuration for an SAE experiment.
 
     Composes all configuration components: model, data, SAE architecture, and training.
-    Use dataclasses.replace() to modify nested configs:
-
-    Example:
-        >>> from dataclasses import replace
-        >>> config = SAEExperimentConfig(...)
-        >>> config = replace(config,
-        ...     model=replace(config.model, layer_idx=5),
-        ...     training=replace(config.training, num_epochs=50)
-        ... )
+    Use dataclasses.replace() to modify nested configs.
 
     Attributes:
         project_name: Project identifier (e.g., "exp01a")

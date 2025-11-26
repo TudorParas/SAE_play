@@ -53,18 +53,6 @@ class TrainPipeline:
                 If None, uses constant coefficient of 1.0.
             use_amp: Use automatic mixed precision training with bfloat16.
                 Speeds up training on modern GPUs with minimal accuracy impact.
-
-        Example (DataLoader mode - preferred):
-            >>> train_raw, test_raw = split_activations(activations, train_frac=0.9)
-            >>> train_mean = train_raw.mean(dim=0, keepdim=True)
-            >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
-            >>> train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-            >>> pipeline = TrainPipeline(
-            ...     sae=sae,
-            ...     optimizer=optimizer,
-            ...     train_loader=train_loader,
-            ...     activation_mean=train_mean,
-            ... )
         """
         self.sae = sae
         self.optimizer = optimizer

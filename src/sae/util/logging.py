@@ -15,20 +15,6 @@ class TeeLogger:
 
     This allows experiments to capture all print output for saving to log files
     while maintaining real-time console output during training.
-
-    Usage:
-        logger = TeeLogger()
-        logger.start()
-
-        print("This goes to both console AND is captured")
-        print("Training epoch 1...")
-
-        logger.stop()
-        captured_log = logger.get_log()
-
-        # Save to file
-        with open("log.txt", "w") as f:
-            f.write(captured_log)
     """
 
     def __init__(self):

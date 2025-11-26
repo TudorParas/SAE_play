@@ -13,8 +13,10 @@ from datetime import datetime
 import torch
 from dataclasses import asdict
 
-from src.sae.configs import SAEExperimentConfig, SimpleSAEConfig, DeepSAEConfig
-from src.sae.data import load_pile_samples, create_dataloader
+from src.sae.configs.experiment import SAEExperimentConfig
+from src.sae.configs.sae import SimpleSAEConfig, DeepSAEConfig
+from src.sae.data.loader import load_pile_samples
+from src.sae.data.datasets import create_dataloader
 from src.sae.training.train_pipeline import TrainPipeline
 from src.sae.training.schedules import WarmupThenLinearSchedule
 from src.sae.checkpoints import save_checkpoint
@@ -34,12 +36,6 @@ def get_project_name(file_path: str) -> str:
 
     Returns:
         Project name extracted from filename
-
-    Example:
-        >>> get_project_name(__file__)  # From "exp01a_simple_sae.py"
-        'exp01a'
-        >>> get_project_name("/path/to/exp02b_deep_sae.py")
-        'exp02b'
     """
     filename = os.path.basename(file_path)
     # Remove .py extension if present
@@ -58,10 +54,6 @@ def get_experiment_name() -> str:
 
     Returns:
         Function name as experiment identifier
-
-    Example:
-        >>> def simple_sae_fast():
-        ...     name = get_experiment_name()  # Returns "simple_sae_fast"
     """
     # Get the caller's frame (1 level up from this function)
     caller_frame = inspect.stack()[1]

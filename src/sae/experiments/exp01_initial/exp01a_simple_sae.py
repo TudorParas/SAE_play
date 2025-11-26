@@ -1,5 +1,5 @@
 from dataclasses import replace
-from src.sae.configs import SIMPLE_SAE
+from src.sae.configs.baselines import SIMPLE_SAE
 from src.sae.experiments.runner import run_sae_experiment, get_experiment_name, get_project_name
 
 
@@ -46,7 +46,6 @@ def simple_sae_base():
         SIMPLE_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
         training=replace(SIMPLE_SAE.training),
-        data=replace(SIMPLE_SAE.data, num_workers=0),
     )
 
     # Run the experiment - that's it!

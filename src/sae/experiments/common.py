@@ -15,10 +15,11 @@ from typing import Tuple, List, Optional
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
-from src.sae.data import load_pile_samples, split_activations, ActivationDataset, create_dataloader
+from src.sae.data.loader import load_pile_samples
+from src.sae.data.datasets import split_activations, ActivationDataset, create_dataloader
 from src.sae.activations import extract_activations
 from src.sae.models.base import BaseSAE
-from src.sae.evaluation import Evaluator, EvalConfig, EvalResults, AnalysisResults
+from src.sae.evaluation.evaluator import Evaluator, EvalConfig, EvalResults, AnalysisResults
 
 
 def load_model(
@@ -32,10 +33,6 @@ def load_model(
 
     Returns:
         Tuple of (model, tokenizer, device_string)
-
-    Example:
-        >>> model, tokenizer, device = load_model("EleutherAI/pythia-70m")
-        >>> print(f"Using device: {device}")
     """
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token  # GPT models need this
@@ -78,12 +75,6 @@ def prepare_activations(
 
     Returns:
         Tuple of (train_dataset, test_dataset, activation_mean)
-
-    Example:
-        >>> train_dataset, test_dataset, activation_mean = prepare_activations(
-        ...     model, tokenizer, texts, layer_idx=3
-        ... )
-        >>> print(f"Train: {len(train_dataset)}, Test: {len(test_dataset)}")
     """
     # Extract activations
     activations = extract_activations(
@@ -135,13 +126,6 @@ def run_evaluation(
     Returns:
         Tuple of (evaluator, eval_results, analysis_results)
         analysis_results is None if sample_texts is None
-
-    Example:
-        >>> evaluator, eval_results, analysis_results = run_evaluation(
-        ...     sae, test_dataset, activation_mean, model, tokenizer, layer_idx,
-        ...     sample_texts=["Hello world", "Neural networks"]
-        ... )
-        >>> print(f"Reconstruction loss: {eval_results.reconstruction_loss:.4f}")
     """
     # Create test DataLoader
     test_loader = create_dataloader(

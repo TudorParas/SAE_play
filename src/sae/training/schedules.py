@@ -84,15 +84,6 @@ class WarmupThenLinearSchedule(Schedule):
     - Learning rate: Warmup from 0 to max LR, then decay to lower LR
     - Sparsity penalty: Keep penalty low initially to learn reconstruction,
       then gradually increase to enforce sparsity
-
-    Example (LR schedule):
-        >>> lr_schedule = WarmupThenLinearSchedule(
-        ...     warmup_value=0.0,      # Start from 0
-        ...     end_value=1e-5,        # Decay to 1e-5
-        ...     warmup_steps=1000,     # Warmup for 1000 steps
-        ...     total_steps=100000     # Total training steps
-        ... )
-        >>> # Then multiply by base LR: lr = base_lr * lr_schedule(step)
     """
 
     def __init__(

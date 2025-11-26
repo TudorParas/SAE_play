@@ -30,17 +30,6 @@ class DeepSAE(BaseSAE):
 
     The forward() method is inherited from BaseSAE (template method pattern).
     This class only defines encode() and decode().
-
-    Example:
-        >>> from src.sae.sparsity import TopKSparsity
-        >>> # Create a 3-layer encoder, 2-layer decoder
-        >>> sae = DeepSAE(
-        ...     input_dim=512,
-        ...     encoder_hidden_dims=[1024, 2048, 4096],
-        ...     decoder_hidden_dims=[2048, 1024],
-        ...     sparsity=TopKSparsity(k=64)
-        ... )
-        >>> # This creates: 512 -> 1024 -> 2048 -> 4096 -> 2048 -> 1024 -> 512
     """
 
     def __init__(

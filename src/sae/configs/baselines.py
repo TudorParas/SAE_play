@@ -27,7 +27,7 @@ SIMPLE_SAE = SAEExperimentConfig(
         extraction_batch_size=32,
         training_batch_size=32,
         seed=42,
-        num_workers=4,
+        num_workers=0,
     ),
     sae=SimpleSAEConfig(
         hidden_dim_multiplier=32,

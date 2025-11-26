@@ -8,24 +8,6 @@ Provides:
 
 Philosophy: Use standard PyTorch patterns (Dataset, DataLoader)
 for explicit, composable data handling. Center using TRAIN mean only.
-
-Example usage (single source):
-    >>> activations = extract_activations(model, tokenizer, texts, layer_idx=3)
-    >>> train_raw, test_raw = split_activations(activations, train_frac=0.9)
-    >>> train_mean = train_raw.mean(dim=0, keepdim=True)
-    >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
-    >>> test_dataset = ActivationDataset(test_raw, mean=train_mean)
-
-Example usage (multiple sources):
-    >>> # Split each source
-    >>> train_A, test_A = split_activations(acts_A, train_frac=0.9)
-    >>> train_B, test_B = split_activations(acts_B, train_frac=0.5)
-    >>> # Combine and compute train mean
-    >>> train_raw = torch.cat([train_A, train_B])
-    >>> test_raw = torch.cat([test_A, test_B])
-    >>> train_mean = train_raw.mean(dim=0, keepdim=True)
-    >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
-    >>> test_dataset = ActivationDataset(test_raw, mean=train_mean)
 """
 
 import torch
@@ -50,14 +32,6 @@ class ActivationDataset(Dataset):
         activations: The centered activation tensor
         mean: The mean used for centering
         dim: Activation dimension
-
-    Example:
-        >>> # Train set - compute its own mean
-        >>> train_mean = train_raw.mean(dim=0, keepdim=True)
-        >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
-        >>>
-        >>> # Test set - use train mean (no data leakage)
-        >>> test_dataset = ActivationDataset(test_raw, mean=train_mean)
     """
 
     def __init__(
@@ -107,12 +81,6 @@ def split_activations(
 
     Returns:
         Tuple of (train_activations, test_activations)
-
-    Example:
-        >>> train_raw, test_raw = split_activations(activations, train_frac=0.9)
-        >>> train_mean = train_raw.mean(dim=0, keepdim=True)
-        >>> train_dataset = ActivationDataset(train_raw, mean=train_mean)
-        >>> test_dataset = ActivationDataset(test_raw, mean=train_mean)
     """
     if not 0.0 < train_frac < 1.0:
         raise ValueError(f"train_frac must be between 0 and 1, got {train_frac}")
@@ -152,12 +120,6 @@ def create_dataloader(
 
     Returns:
         Configured DataLoader
-
-    Example:
-        >>> train_loader = create_dataloader(train_set, batch_size=32, shuffle=True)
-        >>> for batch in train_loader:
-        ...     # batch shape: (batch_size, activation_dim)
-        ...     pass
     """
     return DataLoader(
         dataset,
@@ -190,9 +152,6 @@ def load_texts_from_json(
 
     Returns:
         List of text strings
-
-    Example:
-        >>> texts = load_texts_from_json("pile_samples.json", num_samples=1000)
     """
     path_obj = Path(path)
     if not path_obj.exists():
