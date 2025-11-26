@@ -54,6 +54,22 @@ def simple_sae_base():
     # Results contain training history, evaluation, and output path
     print(f"\nExperiment outputs saved to: {results['output_dir']}")
 
+def simple_sae_base_transpose():
+    """Fast experiment experiment."""
+    # Modify for this experiment - using dataclasses.replace
+    # Changes are visible and explicit
+    config = replace(
+        SIMPLE_SAE,
+        experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
+        training=replace(SIMPLE_SAE.training),
+    )
+
+    # Run the experiment - that's it!
+    results = run_sae_experiment(config)
+
+    # Results contain training history, evaluation, and output path
+    print(f"\nExperiment outputs saved to: {results['output_dir']}")
+
 
 if __name__ == "__main__":
-    simple_sae_base()
+    simple_sae_base_transpose()

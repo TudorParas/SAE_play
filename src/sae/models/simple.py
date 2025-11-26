@@ -66,6 +66,8 @@ class SimpleSAE(BaseSAE):
         # Initialize weights with Xavier initialization for better convergence
         nn.init.xavier_uniform_(self.encoder.weight)
         nn.init.xavier_uniform_(self.decoder.weight)
+        # Initialise encoder to transpose of decoder.
+        self.encoder.weight.data = self.decoder.weight.data.t().clone()
 
     @property
     def input_dim(self) -> int:
