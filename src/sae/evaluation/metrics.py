@@ -124,7 +124,7 @@ def compute_dead_features(
     }
 
 
-def get_spectral_stats(sae_model, activation_batch):
+def get_spectral_stats(feature_acts):
     r"""
     Computes the Effective Latent Dimension (ELD) based on the spectral properties
     of the SAE feature activations.
@@ -153,16 +153,8 @@ def get_spectral_stats(sae_model, activation_batch):
     Returns:
         dict: Contains 'ELD' and 'Top_Component_Explained_Var'.
     """
-    # 1. Get Feature Activations (f(x))
-    # Don't decode; we want to check the "code" itself.
-    with torch.no_grad():
-        # For Simple SAE: encoder(x)
-        # For Deep SAE: encoder(x)
-        feature_acts = sae_model.encode(activation_batch)  # [Batch, d_sae]
-
     # 2. Center the data
     feature_acts = feature_acts - feature_acts.mean(dim=0)
-
     # 3. Compute Singular Values (S) using SVD
     # We use SVD on the data matrix because it's numerically more stable
     # than eig(Covariance). eigenvalues = S**2 / (N-1)

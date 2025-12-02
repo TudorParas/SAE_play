@@ -72,4 +72,4 @@ def simple_sae_base_transpose():
 
 
 if __name__ == "__main__":
-    simple_sae_base_transpose()
+    simple_sae_fast()

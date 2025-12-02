@@ -34,6 +34,7 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 from ..models.base import BaseSAE
 from ..activations import extract_activations
 from .report import ExperimentReport
+from .metrics import compute_reconstruction_loss, compute_sparsity, get_spectral_stats
 
 
 @dataclass
@@ -224,15 +225,16 @@ class Evaluator:
             Tuple of (recon_loss, sparsity_metrics, dead_features)
         """
         total_recon_loss = 0.0
-        total_num_active = 0.0
-        total_l0_norm = 0.0
-        total_l1_norm = 0.0
+        total_sparsity_metrics = {
+            "num_active": 0.0,
+            "l0_norm": 0.0,
+            "l1_norm": 0.0,
+        }
         num_batches = 0
 
         # Track which features have ever been active (for dead feature computation)
         num_features = self.sae.probe_dim
         ever_active = torch.zeros(num_features, dtype=torch.bool, device=self._device)
-
         threshold = self.config.dead_feature_threshold
 
         with torch.no_grad():
@@ -242,17 +244,17 @@ class Evaluator:
                 # Forward pass
                 reconstructed, sparse_features, _ = self.sae(batch)
 
-                # Reconstruction loss
-                recon_loss = torch.nn.functional.mse_loss(reconstructed, batch)
-                total_recon_loss += recon_loss.item()
+                # Reconstruction loss (using metrics.py)
+                total_recon_loss += compute_reconstruction_loss(batch, reconstructed)
 
-                # Sparsity metrics
-                is_active = sparse_features > threshold
-                total_num_active += is_active.float().sum(dim=1).mean().item()
-                total_l0_norm += (sparse_features != 0).float().sum(dim=1).mean().item()
-                total_l1_norm += torch.abs(sparse_features).sum(dim=1).mean().item()
+                # Sparsity metrics (using metrics.py)
+                batch_sparsity = compute_sparsity(sparse_features, threshold=threshold)
+                total_sparsity_metrics["num_active"] += batch_sparsity["num_active"]
+                total_sparsity_metrics["l0_norm"] += batch_sparsity["l0_norm"]
+                total_sparsity_metrics["l1_norm"] += batch_sparsity["l1_norm"]
 
                 # Dead feature tracking
+                is_active = sparse_features > threshold
                 batch_active = is_active.any(dim=0)
                 ever_active = ever_active | batch_active
 
@@ -260,15 +262,11 @@ class Evaluator:
 
         # Average metrics
         avg_recon_loss = total_recon_loss / num_batches
-        avg_num_active = total_num_active / num_batches
-        avg_l0_norm = total_l0_norm / num_batches
-        avg_l1_norm = total_l1_norm / num_batches
-
         sparsity_metrics = {
-            "num_active": avg_num_active,
-            "pct_active": (avg_num_active / num_features) * 100,
-            "l0_norm": avg_l0_norm,
-            "l1_norm": avg_l1_norm,
+            "num_active": total_sparsity_metrics["num_active"] / num_batches,
+            "pct_active": (total_sparsity_metrics["num_active"] / num_batches / num_features) * 100,
+            "l0_norm": total_sparsity_metrics["l0_norm"] / num_batches,
+            "l1_norm": total_sparsity_metrics["l1_norm"] / num_batches,
         }
 
         # Dead features
@@ -287,12 +285,14 @@ class Evaluator:
 
     def _compute_spectral_stats(self, test_loader: DataLoader) -> Dict[str, float]:
         """
-        Compute Effective Latent Dimension (ELD) and related spectral stats.
-
-        Uses a subset of the test set for efficiency.
+        Computes the Effective Latent Dimension (ELD) based on the spectral properties
+        of the SAE feature activations.
 
         Args:
             test_loader: DataLoader yielding centered activations
+
+        Returns:
+            dict: Contains 'ELD' and 'Top_Component_Explained_Var'.
         """
         # Collect activations (up to max_spectral_samples)
         all_features = []
@@ -314,27 +314,8 @@ class Evaluator:
         # Concatenate and truncate to max samples
         feature_acts = torch.cat(all_features, dim=0)[:max_samples]
 
-        # Center the data
-        feature_acts = feature_acts - feature_acts.mean(dim=0)
-
-        # Compute SVD for spectral analysis
-        _, S, _ = torch.linalg.svd(feature_acts, full_matrices=False)
-
-        # Convert singular values to eigenvalues
-        eigenvalues = (S ** 2) / (feature_acts.shape[0] - 1)
-
-        # Effective Latent Dimension
-        sum_eigen = torch.sum(eigenvalues)
-        sum_sq_eigen = torch.sum(eigenvalues ** 2)
-        eld = (sum_eigen ** 2) / sum_sq_eigen
-
-        # Top component explained variance
-        top_component_var = eigenvalues[0] / sum_eigen
-
-        return {
-            "ELD": eld.item(),
-            "Top_Component_Explained_Var": top_component_var.item(),
-        }
+        # Use metrics.py function for spectral analysis
+        return get_spectral_stats(feature_acts)
 
     def generate_report(
         self,
