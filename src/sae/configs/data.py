@@ -18,6 +18,7 @@ class DataConfig:
         extraction_batch_size: Batch size for activation extraction
         training_batch_size: Batch size for SAE training
         seed: Random seed for reproducible splits
+        max_length: Maximum sequence length for tokenization (tokens)
         num_workers: Number of DataLoader worker processes for parallel loading
     """
 
@@ -26,4 +27,5 @@ class DataConfig:
     extraction_batch_size: int
     training_batch_size: int
     seed: int
+    max_length: int
     num_workers: int = 0

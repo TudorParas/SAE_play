@@ -13,6 +13,8 @@ from typing import Dict, Any, Optional, Union
 from src.sae.training.schedules import Schedule, ConstantSchedule
 from src.sae.models.base import BaseSAE
 from src.sae.training.train_metrics import TrainMetrics
+from src.sae.configs.training import AuxKConfig
+from src.sae.training.dead_latent_tracker import DeadLatentTracker
 
 
 class TrainPipeline:
@@ -25,6 +27,7 @@ class TrainPipeline:
         lr_schedule: Optional[Union[Schedule, torch.optim.lr_scheduler.LRScheduler]] = None,
         sparsity_schedule: Optional[Schedule] = None,
         use_amp: bool = False,
+        auxk_config: Optional[AuxKConfig] = None,
     ):
         """
         Train a Sparse Autoencoder on collected activations.
@@ -53,6 +56,8 @@ class TrainPipeline:
                 If None, uses constant coefficient of 1.0.
             use_amp: Use automatic mixed precision training with bfloat16.
                 Speeds up training on modern GPUs with minimal accuracy impact.
+            auxk_config: Optional AuxK configuration for combating dead latents.
+                If provided, enables auxiliary loss on dead latents.
         """
         self.sae = sae
         self.optimizer = optimizer
@@ -79,6 +84,39 @@ class TrainPipeline:
 
         # AMP setup (always use bfloat16 when enabled)
         self._amp_dtype = torch.bfloat16 if use_amp else None
+
+        # AuxK setup for dead latent resurrection
+        self._auxk_config = auxk_config
+        if auxk_config is not None:
+            # Validate sparsity type (AuxK only works with TopK)
+            from src.sae.sparsity import TopKSparsity
+            from src.sae.models.simple import SimpleSAE
+
+            if not isinstance(sae.sparsity, TopKSparsity):
+                raise ValueError(
+                    f"AuxK only supports TopKSparsity, got {type(sae.sparsity).__name__}. "
+                    f"Set auxk=None in training config or change sparsity type."
+                )
+
+            # Validate SAE architecture (SimpleSAE only for now)
+            if not isinstance(sae, SimpleSAE):
+                raise NotImplementedError(
+                    "AuxK currently only supports SimpleSAE. "
+                    "See TODO in train_pipeline.py for DeepSAE implementation."
+                )
+
+            # Instantiate dead latent tracker
+            self._dead_tracker = DeadLatentTracker(
+                num_latents=sae.probe_dim,
+                dead_threshold_tokens=auxk_config.dead_threshold_tokens,
+                device=self._device,
+            )
+            print(
+                f"AuxK enabled: k={auxk_config.k}, α={auxk_config.coefficient}, "
+                f"threshold={auxk_config.dead_threshold_tokens:,} tokens"
+            )
+        else:
+            self._dead_tracker = None
 
     def train_step(
             self,
@@ -120,8 +158,79 @@ class TrainPipeline:
             if hasattr(self.sae, 'global_scale'):
                 scale_penalty = 1e-2 * (self.sae.global_scale ** 2)
 
+            # AuxK auxiliary loss for dead latent resurrection
+            auxk_loss = torch.tensor(0.0, device=batch.device)
+            if self._dead_tracker is not None:
+                # 1. Compute and detach reconstruction error
+                # CRITICAL: Detach to prevent gradients flowing back to main model
+                error = (batch - reconstructed).detach()
+
+                # 2. Get dead latent mask
+                dead_mask = self._dead_tracker.get_dead_mask()
+                num_dead = dead_mask.sum().item()
+
+                if num_dead > 0:
+                    # 3. Extract pre-activations for dead latents only
+                    # Shape: (batch_size, num_dead)
+                    dead_pre_activation = pre_activation[:, dead_mask]
+
+                    # 4. Select top k_aux dead latents (per sample)
+                    k_current = min(self._auxk_config.k, num_dead)
+
+                    # TopK selection per sample
+                    # Shape: vals=(batch, k_current), inds=(batch, k_current)
+                    topk_vals, topk_inds_local = torch.topk(
+                        dead_pre_activation, k=k_current, dim=-1
+                    )
+
+                    # 5. Map local indices back to global latent indices
+                    dead_global_indices = torch.where(dead_mask)[0]
+                    topk_inds_global = dead_global_indices[topk_inds_local]
+
+                    # 6. Sparse decode using dead latent weights
+                    # SIMPLE IMPLEMENTATION (loop-based, easier to debug)
+                    batch_size = topk_vals.shape[0]
+                    error_reconstructions = []
+
+                    for i in range(batch_size):
+                        # Get indices and values for this sample
+                        sample_inds = topk_inds_global[i]  # (k_current,)
+                        sample_vals = topk_vals[i]  # (k_current,)
+
+                        # Gather decoder weights: decoder.weight[:, sample_inds]
+                        # decoder.weight has shape (input_dim, hidden_dim)
+                        sample_weights = self.sae.decoder.weight[:, sample_inds]
+
+                        # Reconstruct: vals @ weights.T
+                        # (k_current,) @ (k_current, input_dim) = (input_dim,)
+                        sample_recon = sample_vals @ sample_weights.T
+
+                        error_reconstructions.append(sample_recon)
+
+                    error_reconstruction = torch.stack(error_reconstructions)
+
+                    # Add bias (SimpleSAE has bias_pre)
+                    error_reconstruction = error_reconstruction + self.sae.bias_pre
+
+                    # TODO: Efficient vectorized implementation (use after verifying simple version works)
+                    # gathered_weights = torch.nn.functional.embedding(
+                    #     topk_inds_global, self.sae.decoder.weight.T
+                    # )
+                    # error_reconstruction = torch.einsum('bk,bki->bi', topk_vals, gathered_weights)
+                    # error_reconstruction = error_reconstruction + self.sae.bias_pre
+
+                    # 7. Compute auxiliary loss
+                    aux_loss_raw = torch.nn.functional.mse_loss(error, error_reconstruction)
+
+                    # 8. NaN guard (critical for stability)
+                    if torch.isnan(aux_loss_raw) or torch.isinf(aux_loss_raw):
+                        print("WARNING: AuxK loss is NaN/Inf, zeroing it out")
+                        auxk_loss = torch.tensor(0.0, device=batch.device, requires_grad=True)
+                    else:
+                        auxk_loss = self._auxk_config.coefficient * aux_loss_raw
+
             # Total loss
-            total_loss = recon_loss + sparsity_loss + scale_penalty
+            total_loss = recon_loss + sparsity_loss + scale_penalty + auxk_loss
 
         # Backward pass (no gradient scaling needed for bfloat16)
         self.optimizer.zero_grad()
@@ -136,6 +245,14 @@ class TrainPipeline:
                 self.sae.sparsity.clamp_thresholds(min_val=0.001, max_val=5.0)
 
             self.sae.anti_cheat()
+
+            # B. Update dead latent tracker (for AuxK)
+            # Track which latents are actually firing
+            if self._auxk_config is not None and self._dead_tracker is not None:
+                # IMPORTANT: Use sparse_features (post-TopK) not pre_activation
+                # For TopK sparsity, we care about which features actually fire
+                # (survive TopK), not which ones had high pre-activation values
+                self._dead_tracker.update(sparse_features.detach())
 
         # Advance the LR schedule.
         if self._lr_schedule is not None and isinstance(self._lr_schedule, torch.optim.lr_scheduler.LRScheduler):
@@ -254,13 +371,21 @@ class TrainPipeline:
 
             epoch_time = time.time() - epoch_start_time
             # Print progress
+            # ToDo: maybe add the number of dead parameters here as well? If we use
             if verbose:
+                if self._dead_tracker is not None:
+                    # 2. Get dead latent mask
+                    dead_mask = self._dead_tracker.get_dead_mask()
+                    num_dead = str(dead_mask.sum().item())
+                else:
+                    num_dead = "Unknown"
                 print(
                     f"Epoch {epoch+1:3d}/{num_epochs} | "
                     f"Loss: {epoch_metrics.loss:.4f} | "
                     f"Recon: {epoch_metrics.recon_loss:.4f} | "
                     f"Active: {epoch_metrics.num_active:.0f}/{self.sae.probe_dim} "
                     f"({epoch_metrics.pct_active:.1f}%)"
+                    f" | Dead: {num_dead}"
                     f" | Time: {epoch_time:.2f}s"
                 )
 

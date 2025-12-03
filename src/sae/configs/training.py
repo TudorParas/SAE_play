@@ -12,6 +12,25 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class AuxKConfig:
+    """
+    Configuration for AuxK auxiliary loss to combat dead latents.
+
+    Based on "Scaling and evaluating sparse autoencoders" (Gao et al., 2024).
+    https://arxiv.org/pdf/2406.04093 (Appendix A.2)
+
+    Attributes:
+        coefficient: Loss weighting (α in paper, typically 1/32)
+        k: Number of dead latents to use (k_aux in paper, typically 512)
+        dead_threshold_tokens: Tokens without activation before flagged dead (typically 10M)
+    """
+
+    coefficient: float = 1 / 32
+    k: int = 512
+    dead_threshold_tokens: int = 10_000_000
+
+
+@dataclass
 class TrainingConfig:
     """
     Configuration for SAE training.
@@ -37,4 +56,7 @@ class TrainingConfig:
     lr_schedule: "LRScheduleConfig | None" = None
     use_compile: bool = False
     use_amp: bool = False
+
+    # AuxK auxiliary loss for combating dead latents (optional)
+    auxk: AuxKConfig | None = None
 

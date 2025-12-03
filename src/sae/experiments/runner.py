@@ -115,6 +115,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         train_frac=config.data.train_frac,
         batch_size=config.data.extraction_batch_size,
         seed=config.data.seed,
+        max_length=config.data.max_length,
     )
     print(f"Train set: {len(train_dataset):,} samples ({config.data.train_frac:.0%})")
     print(f"Test set: {len(test_dataset):,} samples ({1-config.data.train_frac:.0%})")
@@ -183,6 +184,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         lr_schedule=lr_sched,
         sparsity_schedule=sparsity_schedule,
         use_amp=config.training.use_amp,
+        auxk_config=config.training.auxk,
     )
 
     torch.manual_seed(config.training.random_seed)

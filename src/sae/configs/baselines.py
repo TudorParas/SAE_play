@@ -27,6 +27,7 @@ SIMPLE_SAE = SAEExperimentConfig(
         extraction_batch_size=32,
         training_batch_size=32,
         seed=42,
+        max_length=128,
         num_workers=0,
     ),
     sae=SimpleSAEConfig(
@@ -65,6 +66,7 @@ DEEP_SAE = SAEExperimentConfig(
         extraction_batch_size=8,
         training_batch_size=32,
         seed=42,
+        max_length=128,
         num_workers=2,
     ),
     sae=DeepSAEConfig(

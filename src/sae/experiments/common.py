@@ -54,6 +54,7 @@ def prepare_activations(
     train_frac: float = 0.9,
     batch_size: int = 8,
     seed: int = 42,
+    max_length: int = 128,
 ) -> Tuple[ActivationDataset, ActivationDataset, torch.Tensor]:
     """
     Extract activations, split into train/test, and center with train mean.
@@ -72,6 +73,7 @@ def prepare_activations(
         train_frac: Fraction of data for training (default 0.9)
         batch_size: Batch size for activation extraction
         seed: Random seed for reproducible splits
+        max_length: Maximum sequence length for tokenization (default 128)
 
     Returns:
         Tuple of (train_dataset, test_dataset, activation_mean)
@@ -82,7 +84,8 @@ def prepare_activations(
         tokenizer=tokenizer,
         texts=texts,
         layer_idx=layer_idx,
-        batch_size=batch_size
+        batch_size=batch_size,
+        max_length=max_length,
     )
     # Move to CPU - DataLoader will handle GPU transfer (pin_memory requires CPU tensors)
     activations = activations.cpu()
