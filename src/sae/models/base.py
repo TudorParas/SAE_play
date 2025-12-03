@@ -73,6 +73,9 @@ class BaseSAE(nn.Module, ABC):
         2. sparsity.apply(pre_activation) → sparse features
         3. decode(sparse_features) → reconstruction
 
+        Optimization: If both sparsity.apply_with_indices() and decode_sparse()
+        are available, uses sparse decode path for better performance with TopK.
+
         Args:
             x: Input activations, shape (batch_size, input_dim)
 
@@ -86,11 +89,24 @@ class BaseSAE(nn.Module, ABC):
         # Encode to pre-activation features
         pre_activation = self.encode(x)
 
-        # Apply sparsity mechanism (ReLU + TopK, or ReLU + L1, etc.)
-        sparse_features = self.sparsity.apply(pre_activation)
+        # Check if sparse decode path is available
+        # Requires BOTH sparsity.apply_with_indices() AND self.decode_sparse()
+        use_sparse_decode = (
+            hasattr(self.sparsity, 'apply_with_indices') and
+            hasattr(self, 'decode_sparse')
+        )
 
-        # Decode back to input space
-        reconstructed = self.decode(sparse_features)
+        if use_sparse_decode:
+            # SPARSE PATH: Get indices/values and use efficient sparse decode
+            # This avoids dense matrix multiplication when features are highly sparse
+            sparse_features, indices, values = self.sparsity.apply_with_indices(pre_activation)
+            reconstructed = self.decode_sparse(indices, values, apply_bias=True)
+        else:
+            # DENSE PATH: Standard forward pass
+            # Apply sparsity mechanism (ReLU + TopK, or ReLU + L1, etc.)
+            sparse_features = self.sparsity.apply(pre_activation)
+            # Decode back to input space
+            reconstructed = self.decode(sparse_features)
 
         return reconstructed, sparse_features, pre_activation
 

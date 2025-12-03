@@ -11,6 +11,7 @@ from .model import ModelConfig
 from .data import DataConfig
 from .sae import SimpleSAEConfig, DeepSAEConfig
 from .training import TrainingConfig
+from .evaluation import EvalConfig
 
 
 @dataclass
@@ -18,7 +19,7 @@ class SAEExperimentConfig:
     """
     Complete configuration for an SAE experiment.
 
-    Composes all configuration components: model, data, SAE architecture, and training.
+    Composes all configuration components: model, data, SAE architecture, training, and evaluation.
     Use dataclasses.replace() to modify nested configs.
 
     Attributes:
@@ -28,6 +29,7 @@ class SAEExperimentConfig:
         data: Data loading and processing config
         sae: SAE architecture config (SimpleSAE or DeepSAE)
         training: Training hyperparameters
+        evaluation: Evaluation settings (metrics, spectral stats, etc.)
     """
 
     project_name: str
@@ -36,3 +38,4 @@ class SAEExperimentConfig:
     data: DataConfig
     sae: Union[SimpleSAEConfig, DeepSAEConfig]
     training: TrainingConfig
+    evaluation: EvalConfig

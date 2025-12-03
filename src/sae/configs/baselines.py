@@ -11,6 +11,7 @@ from .sae import SimpleSAEConfig, DeepSAEConfig
 from .training import TrainingConfig
 from .experiment import SAEExperimentConfig
 from .lr_schedule import OneCycleLRConfig
+from .evaluation import EvalConfig
 
 
 # Simple SAE with TopK sparsity
@@ -48,6 +49,11 @@ SIMPLE_SAE = SAEExperimentConfig(
         ),
         use_compile=False,  # ToDo: Enable compile when moving off windows. Doesn't work on windows.
         use_amp=True,
+    ),
+    evaluation=EvalConfig(
+        dead_feature_threshold=0.01,
+        max_spectral_samples=2000,  # Reduced from 10000 for faster evaluation
+        feature_analysis_top_k=10,
     ),
 )
 
@@ -87,5 +93,10 @@ DEEP_SAE = SAEExperimentConfig(
         random_seed=53,
         use_compile=False,  # ToDo: Enable compile when moving off windows. Doesn't work on windows.
         use_amp=True,
+    ),
+    evaluation=EvalConfig(
+        dead_feature_threshold=0.01,
+        max_spectral_samples=2000,  # Reduced from 10000 for faster evaluation
+        feature_analysis_top_k=10,
     ),
 )

@@ -190,6 +190,65 @@ class DeepSAE(BaseSAE):
 
         return reconstructed
 
+    def decode_sparse(self, indices: torch.Tensor, values: torch.Tensor, apply_bias: bool = False) -> torch.Tensor:
+        """
+        Efficient sparse decode using only active features in the first layer.
+
+        Note: Sparsity optimization only applies to the FIRST decoder layer
+        (latent → first hidden). After ReLU, activations are no longer sparse,
+        so subsequent layers use standard dense operations.
+
+        For DeepSAE with many layers, the speedup is less dramatic than SimpleSAE,
+        but still beneficial when latent_dim is very large.
+
+        Args:
+            indices: Indices of active features per sample, shape (batch_size, k)
+            values: Values of active features per sample, shape (batch_size, k)
+            apply_bias: whether to add bias_pre. Set to fasle during Auxiliary K computation.
+
+        Returns:
+            Reconstructed input, shape (batch_size, input_dim)
+        """
+        # FIRST LAYER: Sparse operation (latent → first hidden or output)
+        first_layer = self.decoder_layers[0]
+
+        # Gather weights for the first decoder layer
+        # first_layer.weight_orig: (next_dim, latent_dim) - pre-spectral-norm weights
+        # Note: Spectral norm stores original weights in .weight_orig
+        if hasattr(first_layer, 'weight_orig'):
+            # Spectral norm is active - use original weights
+            # The spectral norm hook will apply normalization during forward pass
+            first_weights = first_layer.weight_orig.T  # (latent_dim, next_dim)
+        else:
+            # No spectral norm (shouldn't happen in DeepSAE, but handle gracefully)
+            first_weights = first_layer.weight.T  # (latent_dim, next_dim)
+
+        # Gather only active feature weights
+        gathered_weights = torch.nn.functional.embedding(indices, first_weights)
+        # (batch_size, k, next_dim)
+
+        # Weighted sum
+        reconstructed = torch.einsum('bk,bki->bi', values, gathered_weights)
+        # (batch_size, next_dim)
+
+        # Apply ReLU after first layer (if not the last layer)
+        if len(self.decoder_layers) > 1:
+            reconstructed = F.relu(reconstructed)
+
+        # REMAINING LAYERS: Dense operations (activations no longer sparse after ReLU)
+        for i, layer in enumerate(self.decoder_layers[1:], start=1):
+            reconstructed = layer(reconstructed)
+            # Apply ReLU to all layers except the last
+            if i < len(self.decoder_layers) - 1:
+                reconstructed = F.relu(reconstructed)
+
+        # Apply global scale and centering bias (same as dense decode)
+        reconstructed = reconstructed * self.global_scale
+        if apply_bias:
+            reconstructed = reconstructed + self.bias_pre
+
+        return reconstructed
+
     @torch.no_grad()
     def anti_cheat(self):
         """

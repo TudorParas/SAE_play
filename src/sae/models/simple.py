@@ -111,6 +111,42 @@ class SimpleSAE(BaseSAE):
         # Decode and add back the centering bias
         return self.decoder(features) + self.bias_pre
 
+    def decode_sparse(self, indices: torch.Tensor, values: torch.Tensor, apply_bias: bool = True) -> torch.Tensor:
+        """
+        Efficient sparse decode using only active features.
+
+        Instead of computing dense_features @ decoder_weights (where dense_features
+        is mostly zeros), this gathers only the k relevant decoder weight vectors
+        and computes a weighted sum. This is much faster when k << hidden_dim.
+
+        Speedup example: k=128, hidden_dim=16384 → 128x fewer FLOPs
+
+        Args:
+            indices: Indices of active features per sample, shape (batch_size, k)
+            values: Values of active features per sample, shape (batch_size, k)
+            apply_bias: whether to add bias_pre. Set to fasle during Auxiliary K computation.
+
+        Returns:
+            Reconstructed input, shape (batch_size, input_dim)
+        """
+        # STEP 1: Gather decoder weights for active features only
+        # decoder.weight: (input_dim, hidden_dim)
+        # decoder.weight.T: (hidden_dim, input_dim) - use as embedding lookup table
+        # indices: (batch_size, k) - which features are active
+        # Result: (batch_size, k, input_dim) - decoder weights for active features
+        gathered_weights = torch.nn.functional.embedding(indices, self.decoder.weight.T)
+
+        # STEP 2: Weighted sum of decoder weights
+        # values: (batch_size, k) - activation strength for each active feature
+        # gathered_weights: (batch_size, k, input_dim) - decoder vectors
+        # einsum 'bk,bki->bi': for each sample, sum over k (weighted by values)
+        # Result: (batch_size, input_dim)
+        reconstruction = torch.einsum('bk,bki->bi', values, gathered_weights)
+        # STEP 3: Add decoder bias (same as dense decode)
+        if apply_bias:
+            reconstruction = reconstruction + self.bias_pre
+        return reconstruction
+
     @torch.no_grad()
     def anti_cheat(self):
         """

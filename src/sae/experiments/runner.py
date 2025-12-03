@@ -234,7 +234,8 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
     ]
 
     evaluator, eval_results, analysis_results = run_evaluation(
-        sae, test_dataset, activation_mean, model, tokenizer, config.model.layer_idx, sample_texts
+        sae, test_dataset, activation_mean, model, tokenizer, config.model.layer_idx,
+        config.evaluation, sample_texts
     )
 
     print("\n" + "=" * 60)

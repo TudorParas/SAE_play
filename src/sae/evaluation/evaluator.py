@@ -33,21 +33,9 @@ from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from ..models.base import BaseSAE
 from ..activations import extract_activations
+from ..configs.evaluation import EvalConfig
 from .report import ExperimentReport
 from .metrics import compute_reconstruction_loss, compute_sparsity, get_spectral_stats
-
-
-@dataclass
-class EvalConfig:
-    """Configuration for evaluation."""
-    # Dead features
-    dead_feature_threshold: float = 0.01
-
-    # Spectral stats
-    max_spectral_samples: int = 10000
-
-    # Feature analysis
-    feature_analysis_top_k: int = 10
 
 
 @dataclass

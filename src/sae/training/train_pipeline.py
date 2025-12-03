@@ -185,39 +185,12 @@ class TrainPipeline:
 
                     # 5. Map local indices back to global latent indices
                     dead_global_indices = torch.where(dead_mask)[0]
+
                     topk_inds_global = dead_global_indices[topk_inds_local]
 
-                    # 6. Sparse decode using dead latent weights
-                    # SIMPLE IMPLEMENTATION (loop-based, easier to debug)
-                    batch_size = topk_vals.shape[0]
-                    error_reconstructions = []
-
-                    for i in range(batch_size):
-                        # Get indices and values for this sample
-                        sample_inds = topk_inds_global[i]  # (k_current,)
-                        sample_vals = topk_vals[i]  # (k_current,)
-
-                        # Gather decoder weights: decoder.weight[:, sample_inds]
-                        # decoder.weight has shape (input_dim, hidden_dim)
-                        sample_weights = self.sae.decoder.weight[:, sample_inds]
-
-                        # Reconstruct: vals @ weights.T
-                        # (k_current,) @ (k_current, input_dim) = (input_dim,)
-                        sample_recon = sample_vals @ sample_weights.T
-
-                        error_reconstructions.append(sample_recon)
-
-                    error_reconstruction = torch.stack(error_reconstructions)
-
-                    # Add bias (SimpleSAE has bias_pre)
-                    error_reconstruction = error_reconstruction + self.sae.bias_pre
-
-                    # TODO: Efficient vectorized implementation (use after verifying simple version works)
-                    # gathered_weights = torch.nn.functional.embedding(
-                    #     topk_inds_global, self.sae.decoder.weight.T
-                    # )
-                    # error_reconstruction = torch.einsum('bk,bki->bi', topk_vals, gathered_weights)
-                    # error_reconstruction = error_reconstruction + self.sae.bias_pre
+                    error_reconstruction = self.sae.decode_sparse(
+                        indices=topk_inds_global, values=topk_vals, apply_bias=False
+                    )
 
                     # 7. Compute auxiliary loss
                     aux_loss_raw = torch.nn.functional.mse_loss(error, error_reconstruction)

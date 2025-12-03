@@ -49,7 +49,7 @@ def simple_sae_fast_auxk():
     config = replace(
         SIMPLE_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
-        data=replace(SIMPLE_SAE.data, num_samples=1000),
+        data=replace(SIMPLE_SAE.data, num_samples=1000, training_batch_size=128),
         training=replace(SIMPLE_SAE.training, auxk=auxk, num_epochs=5),
     )
 
@@ -82,4 +82,4 @@ def simple_sae_auxk():
 
 
 if __name__ == "__main__":
-    simple_sae_fast()
+    simple_sae_fast_auxk()

@@ -110,6 +110,7 @@ def run_evaluation(
     model: PreTrainedModel,
     tokenizer: PreTrainedTokenizer,
     layer_idx: int,
+    eval_config: EvalConfig,
     sample_texts: Optional[List[str]] = None,
     eval_batch_size: int = 256,
 ) -> Tuple[Evaluator, EvalResults, Optional[AnalysisResults]]:
@@ -123,6 +124,7 @@ def run_evaluation(
         model: The language model (needed for text analysis)
         tokenizer: Tokenizer (needed for text analysis)
         layer_idx: Layer index (needed for text analysis)
+        eval_config: Evaluation configuration (from experiment config)
         sample_texts: Optional list of texts to analyze features on
         eval_batch_size: Batch size for evaluation
 
@@ -142,7 +144,7 @@ def run_evaluation(
     evaluator = Evaluator(
         sae=sae,
         activation_mean=activation_mean,
-        config=EvalConfig(dead_feature_threshold=0.01),
+        config=eval_config,
     )
 
     # Run evaluation on test set

@@ -113,6 +113,35 @@ class TopKSparsity(SparsityMechanism):
         """
         return torch.tensor(0.0, device=pre_activation.device)
 
+    def apply_with_indices(self, pre_activation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Apply TopK sparsity and return indices/values for sparse decode.
+
+        This enables efficient sparse decoding by avoiding dense matrix multiplication.
+        Instead of computing dense_features @ decoder_weights (mostly zeros),
+        we can gather only the k relevant decoder weights and compute a sparse sum.
+
+        Args:
+            pre_activation: Shape (batch_size, num_features)
+
+        Returns:
+            Tuple of (sparse_features, indices, values):
+                - sparse_features: Sparse tensor with top-k values, shape (batch_size, num_features)
+                - indices: Indices of top-k features per sample, shape (batch_size, k)
+                - values: Values of top-k features per sample, shape (batch_size, k)
+        """
+        # First apply ReLU to get positive activations
+        activated = F.relu(pre_activation)
+
+        # Get top-k indices and values
+        topk_values, topk_indices = torch.topk(activated, k=self.k, dim=-1)
+
+        # Create sparse output tensor (same as apply())
+        result = torch.zeros_like(activated)
+        result.scatter_(-1, topk_indices, topk_values)
+
+        return result, topk_indices, topk_values
+
 
 class L1Sparsity(SparsityMechanism):
     """
