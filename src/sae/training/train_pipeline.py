@@ -28,6 +28,7 @@ class TrainPipeline:
         sparsity_schedule: Optional[Schedule] = None,
         use_amp: bool = False,
         auxk_config: Optional[AuxKConfig] = None,
+        max_grad_norm: Optional[float] = None,
     ):
         """
         Train a Sparse Autoencoder on collected activations.
@@ -58,10 +59,13 @@ class TrainPipeline:
                 Speeds up training on modern GPUs with minimal accuracy impact.
             auxk_config: Optional AuxK configuration for combating dead latents.
                 If provided, enables auxiliary loss on dead latents.
+            max_grad_norm: Maximum gradient norm for clipping. If None, no clipping.
+                Recommended: 1.0 for stability, especially with JumpReLU.
         """
         self.sae = sae
         self.optimizer = optimizer
         self._device = next(sae.parameters()).device
+        self._max_grad_norm = max_grad_norm
 
         self._train_loader = train_loader
         self._centered_activations = None
@@ -208,6 +212,11 @@ class TrainPipeline:
         # Backward pass (no gradient scaling needed for bfloat16)
         self.optimizer.zero_grad()
         total_loss.backward()
+
+        # Gradient clipping for stability
+        if self._max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(self.sae.parameters(), self._max_grad_norm)
+
         self.optimizer.step()
 
         # CRITICAL POST-PROCESSING STEPS

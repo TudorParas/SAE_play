@@ -185,6 +185,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         sparsity_schedule=sparsity_schedule,
         use_amp=config.training.use_amp,
         auxk_config=config.training.auxk,
+        max_grad_norm=config.training.max_grad_norm,
     )
 
     torch.manual_seed(config.training.random_seed)

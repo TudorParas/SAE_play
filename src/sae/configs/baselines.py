@@ -5,6 +5,8 @@ These represent well-tested default configurations that serve as starting points
 for new experiments. Use dataclasses.replace() to modify them.
 """
 
+import sys
+
 from .model import ModelConfig
 from .data import DataConfig
 from .sae import SimpleSAEConfig, DeepSAEConfig
@@ -12,6 +14,9 @@ from .training import TrainingConfig
 from .experiment import SAEExperimentConfig
 from .lr_schedule import OneCycleLRConfig
 from .evaluation import EvalConfig
+
+# torch.compile doesn't work on Windows, auto-detect platform
+_USE_COMPILE = sys.platform != "win32"
 
 
 # Simple SAE with TopK sparsity
@@ -47,12 +52,12 @@ SIMPLE_SAE = SAEExperimentConfig(
             max_lr=1e-3,
             warmup_pct=0.1,
         ),
-        use_compile=False,  # ToDo: Enable compile when moving off windows. Doesn't work on windows.
+        use_compile=_USE_COMPILE,
         use_amp=True,
     ),
     evaluation=EvalConfig(
         dead_feature_threshold=0.01,
-        max_spectral_samples=2000,  # Reduced from 10000 for faster evaluation
+        max_spectral_samples=2000,
         feature_analysis_top_k=10,
     ),
 )
@@ -91,12 +96,12 @@ DEEP_SAE = SAEExperimentConfig(
         sparsity_end_value=2.0,
         sparsity_warmup_epochs=2,
         random_seed=53,
-        use_compile=False,  # ToDo: Enable compile when moving off windows. Doesn't work on windows.
+        use_compile=_USE_COMPILE,
         use_amp=True,
     ),
     evaluation=EvalConfig(
         dead_feature_threshold=0.01,
-        max_spectral_samples=2000,  # Reduced from 10000 for faster evaluation
+        max_spectral_samples=2000,
         feature_analysis_top_k=10,
     ),
 )

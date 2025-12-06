@@ -45,6 +45,8 @@ class TrainingConfig:
         random_seed: Random seed for training
         use_compile: Use torch.compile for faster training (PyTorch 2.0+)
         use_amp: Use automatic mixed precision training (bfloat16)
+        max_grad_norm: Maximum gradient norm for clipping (None to disable)
+        auxk: AuxK auxiliary loss config for combating dead latents (None to disable)
     """
 
     num_epochs: int
@@ -56,7 +58,6 @@ class TrainingConfig:
     lr_schedule: "LRScheduleConfig | None" = None
     use_compile: bool = False
     use_amp: bool = False
-
-    # AuxK auxiliary loss for combating dead latents (optional)
+    max_grad_norm: float | None = None
     auxk: AuxKConfig | None = None
 

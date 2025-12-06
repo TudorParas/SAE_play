@@ -8,6 +8,7 @@ Usage:
     evaluator = Evaluator(
         sae=sae,
         activation_mean=activation_mean,
+        config=eval_config,
     )
 
     # Run evaluation on test set
@@ -27,7 +28,7 @@ Usage:
 
 import torch
 from torch.utils.data import DataLoader
-from typing import Dict, Any, List, Optional
+from typing import Any
 from dataclasses import dataclass, field
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
@@ -43,14 +44,14 @@ class EvalResults:
     """Container for evaluation results (metrics on test set)."""
     # Core metrics
     reconstruction_loss: float = 0.0
-    sparsity_metrics: Dict[str, float] = field(default_factory=dict)
-    dead_features: Dict[str, Any] = field(default_factory=dict)
-    spectral_stats: Dict[str, float] = field(default_factory=dict)
+    sparsity_metrics: dict[str, float] = field(default_factory=dict)
+    dead_features: dict[str, Any] = field(default_factory=dict)
+    spectral_stats: dict[str, float] = field(default_factory=dict)
 
     # Metadata
     num_eval_samples: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for reporting."""
         return {
             "reconstruction_loss": self.reconstruction_loss,
@@ -64,9 +65,9 @@ class EvalResults:
 @dataclass
 class AnalysisResults:
     """Container for text analysis results."""
-    texts: List[Dict[str, Any]] = field(default_factory=list)
+    texts: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for reporting."""
         return {"texts": self.texts}
 
@@ -88,11 +89,11 @@ class Evaluator:
         self,
         sae: BaseSAE,
         activation_mean: torch.Tensor,
-        config: Optional[EvalConfig] = None,
+        config: EvalConfig,
     ):
         self.sae = sae
         self.activation_mean = activation_mean
-        self.config = config or EvalConfig()
+        self.config = config
 
         # Get device from SAE
         self._device = next(sae.parameters()).device
@@ -134,7 +135,7 @@ class Evaluator:
         self,
         model: PreTrainedModel,
         tokenizer: PreTrainedTokenizer,
-        texts: List[str],
+        texts: list[str],
         layer_idx: int,
     ) -> AnalysisResults:
         """
@@ -271,7 +272,7 @@ class Evaluator:
 
         return avg_recon_loss, sparsity_metrics, dead_features
 
-    def _compute_spectral_stats(self, test_loader: DataLoader) -> Dict[str, float]:
+    def _compute_spectral_stats(self, test_loader: DataLoader) -> dict[str, float]:
         """
         Computes the Effective Latent Dimension (ELD) based on the spectral properties
         of the SAE feature activations.
@@ -310,13 +311,13 @@ class Evaluator:
         experiment_id: str,
         timestamp: str,
         description: str = "",
-        training_results: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        training_results: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         log_text: str = "",
         checkpoint_path: str = "",
-        save_path: Optional[str] = None,
-        eval_results: Optional[EvalResults] = None,
-        analysis_results: Optional[AnalysisResults] = None,
+        save_path: str | None = None,
+        eval_results: EvalResults | None = None,
+        analysis_results: AnalysisResults | None = None,
     ) -> ExperimentReport:
         """
         Generate a complete experiment report.
