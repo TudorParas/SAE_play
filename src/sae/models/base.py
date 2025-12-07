@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 from typing import Dict, Any
-from ..sparsity import SparsityMechanism
+from src.sae.sparsity import SparsityMechanism
 
 
 class BaseSAE(nn.Module, ABC):

@@ -15,11 +15,12 @@ from typing import Tuple, List, Optional
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
-from src.sae.data.loader import load_pile_samples
+from src.sae.data.loader import load_samples
 from src.sae.data.datasets import split_activations, ActivationDataset, create_dataloader
 from src.sae.activations import extract_activations
 from src.sae.models.base import BaseSAE
 from src.sae.evaluation.evaluator import Evaluator, EvalConfig, EvalResults, AnalysisResults
+from src.sae.configs.data import SourceConfig
 
 
 def load_model(
@@ -99,6 +100,110 @@ def prepare_activations(
     # Create datasets (both centered with train mean)
     train_dataset = ActivationDataset(train_raw, mean=train_mean)
     test_dataset = ActivationDataset(test_raw, mean=train_mean)
+
+    return train_dataset, test_dataset, train_mean
+
+
+def prepare_mixed_activations(
+    model: PreTrainedModel,
+    tokenizer: PreTrainedTokenizer,
+    sources: List[SourceConfig],
+    layer_idx: int,
+    num_samples: int | None = None,
+    batch_size: int = 8,
+    seed: int = 42,
+    max_length: int = 128,
+) -> Tuple[ActivationDataset, ActivationDataset, torch.Tensor]:
+    """
+    Extract activations from multiple sources, split per-source, and combine.
+
+    For each source:
+    1. Load texts from source
+    2. Extract activations
+    3. Split by source's train_frac/test_frac
+
+    Then:
+    4. Concatenate all train tensors, all test tensors
+    5. Compute mean on combined train only (no data leakage)
+    6. Center both train and test with train mean
+    7. Create datasets
+
+    Args:
+        model: The language model to extract activations from
+        tokenizer: Tokenizer for the model
+        sources: List of SourceConfig with name, train_frac, test_frac
+        layer_idx: Which layer to extract activations from
+        num_samples: Number of samples to load per source (None = all)
+        batch_size: Batch size for activation extraction
+        seed: Random seed for reproducible splits
+        max_length: Maximum sequence length for tokenization
+
+    Returns:
+        Tuple of (train_dataset, test_dataset, activation_mean)
+    """
+    all_train_tensors = []
+    all_test_tensors = []
+
+    for source in sources:
+        print(f"  Processing source: {source.name}")
+
+        # Load texts from this source
+        texts = load_samples(
+            source=source.name,
+            num_samples=num_samples,
+            shuffle=True,
+            seed=seed,
+        )
+        print(f"    Loaded {len(texts)} texts")
+
+        # Extract activations
+        activations = extract_activations(
+            model=model,
+            tokenizer=tokenizer,
+            texts=texts,
+            layer_idx=layer_idx,
+            batch_size=batch_size,
+            max_length=max_length,
+        )
+        activations = activations.cpu()
+        print(f"    Extracted {activations.shape[0]} activation vectors")
+
+        # Split by this source's fractions
+        n_total = activations.shape[0]
+        n_train = int(n_total * source.train_frac)
+        n_test = int(n_total * source.test_frac)
+
+        # Shuffle before splitting
+        generator = torch.Generator().manual_seed(seed)
+        perm = torch.randperm(n_total, generator=generator)
+
+        train_indices = perm[:n_train]
+        test_indices = perm[n_train : n_train + n_test]
+
+        train_raw = activations[train_indices]
+        test_raw = activations[test_indices]
+
+        print(f"    Split: {n_train} train, {n_test} test")
+
+        all_train_tensors.append(train_raw)
+        all_test_tensors.append(test_raw)
+
+    # Concatenate all sources
+    train_combined = torch.cat(all_train_tensors, dim=0)
+    test_combined = torch.cat(all_test_tensors, dim=0)
+
+    print(f"\n  Combined: {train_combined.shape[0]} train, {test_combined.shape[0]} test")
+
+    # Compute mean on TRAIN only (no data leakage)
+    train_mean = train_combined.mean(dim=0, keepdim=True)
+
+    # Center both with train mean
+    train_centered = train_combined - train_mean
+    test_centered = test_combined - train_mean
+
+    # Create datasets (already centered, pass mean for reference)
+    train_dataset = ActivationDataset(train_centered, mean=torch.zeros_like(train_mean))
+    test_dataset = ActivationDataset(test_centered, mean=torch.zeros_like(train_mean))
 
     return train_dataset, test_dataset, train_mean
 

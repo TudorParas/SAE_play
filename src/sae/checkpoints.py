@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 from dataclasses import asdict
-from .models.base import BaseSAE
-from .models.simple import SimpleSAE
-from .models.deep import DeepSAE
+from src.sae.models.base import BaseSAE
+from src.sae.models.simple import SimpleSAE
+from src.sae.models.deep import DeepSAE
 
 
 def save_checkpoint(
@@ -97,7 +97,7 @@ def load_checkpoint(
     if 'hidden_dim_multiplier' in sae_config:
         # SimpleSAE
         hidden_dim = input_dim * sae_config['hidden_dim_multiplier']
-        from .sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+        from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
 
         # Create sparsity mechanism
         sparsity_type = sae_config.get('sparsity_type', 'topk')
@@ -115,7 +115,7 @@ def load_checkpoint(
         encoder_hidden_dims = [input_dim * m for m in sae_config['encoder_hidden_dims']]
         decoder_hidden_dims = [input_dim * m for m in sae_config['decoder_hidden_dims']]
 
-        from .sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+        from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
         sparsity_type = sae_config.get('sparsity_type', 'l1')
         if sparsity_type == 'topk':
             sparsity = TopKSparsity(k=sae_config.get('sparsity_k', 64))

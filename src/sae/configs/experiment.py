@@ -7,11 +7,11 @@ Composes all config components into a single experiment specification.
 from dataclasses import dataclass
 from typing import Union
 
-from .model import ModelConfig
-from .data import DataConfig
-from .sae import SimpleSAEConfig, DeepSAEConfig
-from .training import TrainingConfig
-from .evaluation import EvalConfig
+from src.sae.configs.model import ModelConfig
+from src.sae.configs.data import DataConfig
+from src.sae.configs.sae import SimpleSAEConfig, DeepSAEConfig
+from src.sae.configs.training import TrainingConfig
+from src.sae.configs.evaluation import EvalConfig
 
 
 @dataclass

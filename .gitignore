@@ -8,3 +8,6 @@
 /src/sae/data/pile_samples.json
 /src/sae/evaluation/EVAL_PLAN.md
 reports/
+
+# Dataset cache (downloaded via src/sae/data/sources/)
+/data/

@@ -7,8 +7,8 @@ This is a baseline SAE with one encoder layer and one decoder layer.
 import torch
 import torch.nn as nn
 from typing import Dict, Any
-from .base import BaseSAE
-from ..sparsity import SparsityMechanism, TopKSparsity, L1Sparsity
+from src.sae.models.base import BaseSAE
+from src.sae.sparsity import SparsityMechanism, TopKSparsity, L1Sparsity
 
 
 class SimpleSAE(BaseSAE):

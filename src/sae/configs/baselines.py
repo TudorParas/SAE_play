@@ -7,13 +7,13 @@ for new experiments. Use dataclasses.replace() to modify them.
 
 import sys
 
-from .model import ModelConfig
-from .data import DataConfig
-from .sae import SimpleSAEConfig, DeepSAEConfig
-from .training import TrainingConfig
-from .experiment import SAEExperimentConfig
-from .lr_schedule import OneCycleLRConfig
-from .evaluation import EvalConfig
+from src.sae.configs.model import ModelConfig
+from src.sae.configs.data import DataConfig, SourceConfig
+from src.sae.configs.sae import SimpleSAEConfig, DeepSAEConfig
+from src.sae.configs.training import TrainingConfig
+from src.sae.configs.experiment import SAEExperimentConfig
+from src.sae.configs.lr_schedule import OneCycleLRConfig
+from src.sae.configs.evaluation import EvalConfig
 
 # torch.compile doesn't work on Windows, auto-detect platform
 _USE_COMPILE = sys.platform != "win32"
@@ -28,8 +28,10 @@ SIMPLE_SAE = SAEExperimentConfig(
         layer_idx=4,
     ),
     data=DataConfig(
+        sources=[
+            SourceConfig(name="wikitext", train_frac=0.9, test_frac=0.1),
+        ],
         num_samples=10000,
-        train_frac=0.9,
         extraction_batch_size=32,
         training_batch_size=32,
         seed=42,
@@ -72,8 +74,10 @@ DEEP_SAE = SAEExperimentConfig(
         layer_idx=4,
     ),
     data=DataConfig(
+        sources=[
+            SourceConfig(name="wikitext", train_frac=0.9, test_frac=0.1),
+        ],
         num_samples=10000,
-        train_frac=0.9,
         extraction_batch_size=8,
         training_batch_size=32,
         seed=42,

@@ -32,11 +32,11 @@ from typing import Any
 from dataclasses import dataclass, field
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
-from ..models.base import BaseSAE
-from ..activations import extract_activations
-from ..configs.evaluation import EvalConfig
-from .report import ExperimentReport
-from .metrics import compute_reconstruction_loss, compute_sparsity, get_spectral_stats
+from src.sae.models.base import BaseSAE
+from src.sae.activations import extract_activations
+from src.sae.configs.evaluation import EvalConfig
+from src.sae.evaluation.report import ExperimentReport
+from src.sae.evaluation.metrics import compute_reconstruction_loss, compute_sparsity, get_spectral_stats
 
 
 @dataclass

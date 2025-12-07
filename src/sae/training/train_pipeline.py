@@ -23,7 +23,6 @@ class TrainPipeline:
         sae: BaseSAE,
         optimizer: torch.optim.Optimizer,
         train_loader: DataLoader,
-        activation_mean: Optional[torch.Tensor] = None,
         lr_schedule: Optional[Union[Schedule, torch.optim.lr_scheduler.LRScheduler]] = None,
         sparsity_schedule: Optional[Schedule] = None,
         use_amp: bool = False,
@@ -47,8 +46,6 @@ class TrainPipeline:
             sae: The SAE model to train
             optimizer: The optimizer to use for training
             train_loader: [PREFERRED] DataLoader from ActivationDataset (already centered).
-            activation_mean: Mean tensor for centering. Required if train_loader is used.
-                            Should be computed from TRAIN data only to avoid data leakage.
             lr_schedule: Learning rate schedule. Three options:
                 - None: Use the optimizer's initial learning rate (no scheduling).
                 - Schedule: Custom epoch-based schedule (calls schedule(epoch)).
@@ -71,14 +68,6 @@ class TrainPipeline:
         self._centered_activations = None
         self._num_samples = len(train_loader.dataset)
         self._use_dataloader = True
-
-        # Require activation mean for DataLoader mode
-        if activation_mean is None:
-            raise ValueError(
-                "activation_mean is required when using DataLoader mode. "
-                "Compute it from your training data before creating datasets."
-            )
-        self.activation_mean = activation_mean
 
         # Schedules
         self._lr_schedule = lr_schedule
@@ -269,7 +258,6 @@ class TrainPipeline:
 
         Returns:
             Dictionary containing:
-                - 'activation_mean': Mean of input activations (needed for inference)
                 - 'loss_history': List of average losses per epoch
                 - 'recon_loss_history': List of reconstruction losses
                 - 'sparsity_history': List of sparsity percentages
@@ -376,7 +364,6 @@ class TrainPipeline:
             print("Training complete!\n")
 
         return {
-            'activation_mean': self.activation_mean,
             'loss_history': loss_history,
             'recon_loss_history': recon_loss_history,
             'sparsity_history': sparsity_history,

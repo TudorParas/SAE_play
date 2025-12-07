@@ -15,14 +15,13 @@ from dataclasses import asdict
 
 from src.sae.configs.experiment import SAEExperimentConfig
 from src.sae.configs.sae import SimpleSAEConfig, DeepSAEConfig
-from src.sae.data.loader import load_pile_samples
 from src.sae.data.datasets import create_dataloader
 from src.sae.training.train_pipeline import TrainPipeline
 from src.sae.training.schedules import WarmupThenLinearSchedule
 from src.sae.checkpoints import save_checkpoint
 from src.sae.util.logging import TeeLogger
 
-from .common import prepare_activations, run_evaluation
+from src.sae.experiments.common import prepare_mixed_activations, run_evaluation
 
 
 def get_project_name(file_path: str) -> str:
@@ -94,31 +93,31 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
     print("=" * 60)
 
     # ========================================================================
-    # 1. Load data and model
+    # 1. Load model
     # ========================================================================
-    print("\n[1/6] Loading data and model...")
-    texts = load_pile_samples(num_samples=config.data.num_samples, shuffle=True)
-    print(f"Loaded {len(texts)} texts")
-
+    print("\n[1/6] Loading model...")
     model, tokenizer, device = config.model.resolve()
     print(f"Using device: {device}")
 
     # ========================================================================
-    # 2. Extract and prepare activations
+    # 2. Extract and prepare activations from sources
     # ========================================================================
     print("\n[2/6] Extracting and preparing activations...")
-    train_dataset, test_dataset, activation_mean = prepare_activations(
+    source_names = [s.name for s in config.data.sources]
+    print(f"Sources: {', '.join(source_names)}")
+
+    train_dataset, test_dataset, activation_mean = prepare_mixed_activations(
         model,
         tokenizer,
-        texts,
+        config.data.sources,
         config.model.layer_idx,
-        train_frac=config.data.train_frac,
+        num_samples=config.data.num_samples,
         batch_size=config.data.extraction_batch_size,
         seed=config.data.seed,
         max_length=config.data.max_length,
     )
-    print(f"Train set: {len(train_dataset):,} samples ({config.data.train_frac:.0%})")
-    print(f"Test set: {len(test_dataset):,} samples ({1-config.data.train_frac:.0%})")
+    print(f"Train set: {len(train_dataset):,} samples")
+    print(f"Test set: {len(test_dataset):,} samples")
 
     # ========================================================================
     # 3. Create SAE
@@ -180,7 +179,6 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
         sae=sae,
         optimizer=optimizer,
         train_loader=train_loader,
-        activation_mean=activation_mean,
         lr_schedule=lr_sched,
         sparsity_schedule=sparsity_schedule,
         use_amp=config.training.use_amp,
@@ -252,7 +250,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
     # Generate report
     report_metadata = {
         "device": device,
-        "num_text_samples": len(texts),
+        "sources": [s.name for s in config.data.sources],
         "num_tokens": len(train_dataset) + len(test_dataset),
         "train_samples": len(train_dataset),
         "test_samples": len(test_dataset),

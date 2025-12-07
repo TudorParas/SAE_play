@@ -5,7 +5,7 @@ Metrics for evaluating SAE quality.
 import torch
 from typing import Dict, Any
 
-from ..models.base import BaseSAE
+from src.sae.models.base import BaseSAE
 
 
 def compute_reconstruction_loss(

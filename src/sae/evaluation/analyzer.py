@@ -8,8 +8,8 @@ activate them.
 import torch
 from typing import List, Dict, Any
 from transformers import PreTrainedModel, PreTrainedTokenizer
-from ..models.base import BaseSAE
-from ..activations import extract_activations
+from src.sae.models.base import BaseSAE
+from src.sae.activations import extract_activations
 
 
 def analyze_features(

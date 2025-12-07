@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .lr_schedule import LRScheduleConfig
+    from src.sae.configs.lr_schedule import LRScheduleConfig
 
 
 @dataclass

@@ -1,64 +1,55 @@
 """
-Data loader that handles path resolution automatically.
+Data loader for text samples.
 
-This finds the data file relative to this module's location, so it works
-regardless of where you run your script from (PyCharm, command line, etc.).
+Loads from named sources (openwebtext, wikitext, c4) stored as Parquet in data/.
+For multi-source mixing, see mixer.py.
 """
 
-import json
-from pathlib import Path
-from typing import List, Optional
 import random
 
-
-# Find the data directory (same directory as this file)
-_DATA_DIR = Path(__file__).parent
-_DEFAULT_DATA_FILE = _DATA_DIR / "pile_samples.json"
+from src.sae.data.sources.sources_registry import get_source_path, source_exists, list_available_sources
+from src.sae.data.sources.base import load_samples as load_parquet
 
 
-def load_pile_samples(
-    data_file: Optional[str] = None,
-    num_samples: Optional[int] = None,
+def load_samples(
+    source: str,
+    num_samples: int | None = None,
     shuffle: bool = True,
-    seed: int = 42
-) -> List[str]:
+    seed: int = 42,
+) -> list[str]:
     """
-    Load text samples from The Pile dataset.
+    Load text samples from a named source.
 
-    This automatically finds the data file relative to the module location,
-    so it works regardless of your current working directory.
+    Sources are stored as Parquet files in the data/ directory.
+    Use the downloader scripts to fetch data:
+        python -m src.sae.data.sources.download_wikitext
+        python -m src.sae.data.sources.download_c4
 
     Args:
-        data_file: Optional path to data file. If None, uses the default
-                   pile_samples.json in this module's directory.
-        num_samples: How many samples to load (None = load all available)
-        shuffle: Whether to shuffle the samples before selection
+        source: Source name (e.g., "openwebtext", "wikitext", "c4")
+        num_samples: How many samples to load (None = load all)
+        shuffle: Whether to shuffle before selection
         seed: Random seed for reproducible shuffling
 
     Returns:
         List of text strings
 
     Raises:
-        FileNotFoundError: If the data file doesn't exist
+        FileNotFoundError: If the source data doesn't exist
     """
-    # Use default data file if none specified
-    if data_file is None:
-        data_path = _DEFAULT_DATA_FILE
-    else:
-        data_path = Path(data_file)
-
-    if not data_path.exists():
+    if not source_exists(source):
+        path = get_source_path(source)
+        available = ", ".join(list_available_sources())
         raise FileNotFoundError(
-            f"Data file not found: {data_path}\n"
-            f"Expected location: {data_path.absolute()}\n"
-            f"Please ensure pile_samples.json exists at this location."
+            f"Source '{source}' not found at: {path}\n"
+            f"Run: python -m src.sae.data.sources.{source}\n"
+            f"Available sources: {available}"
         )
 
-    with open(data_path, 'r', encoding='utf-8') as f:
-        samples = json.load(f)
-
-    # Extract text field from each sample
-    texts = [s['text'] for s in samples]
+    # Load from Parquet
+    path = get_source_path(source)
+    df = load_parquet(path)
+    texts = df["text"].tolist()
 
     # Shuffle if requested
     if shuffle:
@@ -70,23 +61,3 @@ def load_pile_samples(
         texts = texts[:num_samples]
 
     return texts
-
-
-def get_data_dir() -> Path:
-    """
-    Get the path to the data directory.
-
-    Returns:
-        Path object pointing to the data directory
-    """
-    return _DATA_DIR
-
-
-def get_default_data_file() -> Path:
-    """
-    Get the path to the default pile_samples.json file.
-
-    Returns:
-        Path object pointing to pile_samples.json
-    """
-    return _DEFAULT_DATA_FILE

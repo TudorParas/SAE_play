@@ -9,8 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Dict, Any
-from .base import BaseSAE
-from ..sparsity import SparsityMechanism
+from src.sae.models.base import BaseSAE
+from src.sae.sparsity import SparsityMechanism
 
 
 class DeepSAE(BaseSAE):
@@ -55,7 +55,7 @@ class DeepSAE(BaseSAE):
         """
         # Import here to avoid circular dependency
         if sparsity is None:
-            from ..sparsity import TopKSparsity
+            from src.sae.sparsity import TopKSparsity
             sparsity = TopKSparsity(k=64)
 
         super().__init__(sparsity)
