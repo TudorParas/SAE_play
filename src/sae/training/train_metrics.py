@@ -4,7 +4,7 @@ Training metrics dataclass.
 Type-safe container for training metrics instead of passing dicts with string keys.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields
 
 
 @dataclass
@@ -21,33 +21,16 @@ class TrainMetrics:
     pct_active: float = 0.0
 
     def update(self, other: 'TrainMetrics', weight: float = 1.0):
-        """
-        Update this metrics object by adding weighted values from another.
-
-        Useful for accumulating batch metrics into epoch metrics.
-
-        Args:
-            other: Another TrainMetrics object
-            weight: Weight to apply to the other metrics (default: 1.0)
-        """
-        self.loss += other.loss * weight
-        self.recon_loss += other.recon_loss * weight
-        self.sparsity_loss += other.sparsity_loss * weight
-        self.num_active += other.num_active * weight
-        self.pct_active += other.pct_active * weight
+        """Add weighted values from another TrainMetrics object."""
+        for f in fields(self):
+            current = getattr(self, f.name)
+            other_val = getattr(other, f.name)
+            setattr(self, f.name, current + other_val * weight)
 
     def scale(self, factor: float):
-        """
-        Scale all metrics by a factor (e.g., to compute averages).
-
-        Args:
-            factor: Scaling factor
-        """
-        self.loss *= factor
-        self.recon_loss *= factor
-        self.sparsity_loss *= factor
-        self.num_active *= factor
-        self.pct_active *= factor
+        """Scale all metrics by a factor (e.g., to compute averages)."""
+        for f in fields(self):
+            setattr(self, f.name, getattr(self, f.name) * factor)
 
     def __repr__(self) -> str:
         """String representation for logging."""

@@ -19,7 +19,8 @@ def analyze_features(
     texts: List[str],
     activation_mean: torch.Tensor,
     layer_idx: int,
-    top_k: int = 10
+    top_k: int = 10,
+    threshold: float = 0.01,
 ) -> List[Dict[str, Any]]:
     """
     Analyze which sparse features activate for different texts.
@@ -35,6 +36,7 @@ def analyze_features(
         activation_mean: Mean of training activations (for centering)
         layer_idx: Which layer to extract activations from
         top_k: How many top features to return per text
+        threshold: Activation threshold to consider a feature "active"
 
     Returns:
         List of dictionaries (one per text) containing:
@@ -75,7 +77,6 @@ def analyze_features(
         ]
 
         # Compute active features
-        threshold = 0.01
         num_active = (avg_features > threshold).sum().item()
         total_features = len(avg_features)
         pct_active = (num_active / total_features) * 100

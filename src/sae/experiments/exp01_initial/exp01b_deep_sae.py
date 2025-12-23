@@ -1,20 +1,20 @@
 from dataclasses import replace
 
 from sae.configs.data import SourceConfig
-from src.sae.configs.baselines import SIMPLE_SAE
+from src.sae.configs.baselines import DEEP_SAE
 from src.sae.configs.training import AuxKConfig
 from src.sae.experiments.runner import run_sae_experiment, get_experiment_name, get_project_name
 
 
-def simple_sae_fast():
+def deep_sae_fast():
     """Fast experiment experiment."""
     # Modify for this experiment - using dataclasses.replace
     # Changes are visible and explicit
     config = replace(
-        SIMPLE_SAE,
+        DEEP_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
-        data=replace(SIMPLE_SAE.data, num_samples=1000),
-        training=replace(SIMPLE_SAE.training, num_epochs=5),
+        data=replace(DEEP_SAE.data, num_samples=1000),
+        training=replace(DEEP_SAE.training, num_epochs=5),
     )
 
     # Run the experiment - that's it!
@@ -24,15 +24,15 @@ def simple_sae_fast():
     print(f"\nExperiment outputs saved to: {results['output_dir']}")
 
 
-def simple_sae_base():
+def deep_sae_base():
     """Fast experiment experiment."""
     # Modify for this experiment - using dataclasses.replace
     # Changes are visible and explicit
     # auxk = AuxKConfig(dead_threshold_tokens=100_000)
     config = replace(
-        SIMPLE_SAE,
+        DEEP_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
-        training=replace(SIMPLE_SAE.training),
+        training=replace(DEEP_SAE.training),
     )
 
     # Run the experiment - that's it!
@@ -42,17 +42,17 @@ def simple_sae_base():
     print(f"\nExperiment outputs saved to: {results['output_dir']}")
 
 
-def simple_sae_fast_auxk():
+def deep_sae_fast_auxk():
     """Fast experiment experiment."""
     # Modify for this experiment - using dataclasses.replace
     # Changes are visible and explicit
     auxk = AuxKConfig(dead_threshold_tokens=100_000)
 
     config = replace(
-        SIMPLE_SAE,
+        DEEP_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
-        data=replace(SIMPLE_SAE.data, num_samples=1000, training_batch_size=128),
-        training=replace(SIMPLE_SAE.training, auxk=auxk, num_epochs=5),
+        data=replace(DEEP_SAE.data, num_samples=1000, training_batch_size=128),
+        training=replace(DEEP_SAE.training, auxk=auxk, num_epochs=5),
     )
 
     # Run the experiment - that's it!
@@ -61,7 +61,7 @@ def simple_sae_fast_auxk():
     # Results contain training history, evaluation, and output path
     print(f"\nExperiment outputs saved to: {results['output_dir']}")
 
-def simple_sae_auxk():
+def deep_sae_auxk():
     """SimpleSAE with AuxK auxiliary loss for combating dead latents."""
     # Enable AuxK with default parameters from paper:
     # - coefficient: 1/32 (α in paper)
@@ -71,9 +71,9 @@ def simple_sae_auxk():
 
 
     config = replace(
-        SIMPLE_SAE,
+        DEEP_SAE,
         experiment_name=get_experiment_name(), project_name=get_project_name(__file__),
-        training=replace(SIMPLE_SAE.training, auxk=auxk),
+        training=replace(DEEP_SAE.training, auxk=auxk),
     )
 
     # Run the experiment - that's it!
@@ -85,4 +85,4 @@ def simple_sae_auxk():
 
 
 if __name__ == "__main__":
-    simple_sae_auxk()
+    deep_sae_fast_auxk()

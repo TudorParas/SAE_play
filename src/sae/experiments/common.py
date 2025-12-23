@@ -16,10 +16,10 @@ from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel, PreTrainedTokenizer
 
 from src.sae.data.loader import load_samples
-from src.sae.data.datasets import split_activations, ActivationDataset, create_dataloader
+from src.sae.data.datasets import split_activations, ActivationDataset
 from src.sae.activations import extract_activations
 from src.sae.models.base import BaseSAE
-from src.sae.evaluation.evaluator import Evaluator, EvalConfig, EvalResults, AnalysisResults
+from src.sae.evaluation.evaluator import Evaluator, EvalConfig, EvalResults
 from src.sae.configs.data import SourceConfig
 
 
@@ -218,7 +218,7 @@ def run_evaluation(
     eval_config: EvalConfig,
     sample_texts: Optional[List[str]] = None,
     eval_batch_size: int = 256,
-) -> Tuple[Evaluator, EvalResults, Optional[AnalysisResults]]:
+) -> Tuple[Evaluator, EvalResults, Optional[List[dict]]]:
     """
     Run full evaluation: compute metrics on test set and optionally analyze sample texts.
 
@@ -238,7 +238,7 @@ def run_evaluation(
         analysis_results is None if sample_texts is None
     """
     # Create test DataLoader
-    test_loader = create_dataloader(
+    test_loader = DataLoader(
         test_dataset,
         batch_size=eval_batch_size,
         shuffle=False,

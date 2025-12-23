@@ -4,17 +4,14 @@ PyTorch Dataset classes for SAE training and evaluation.
 Provides:
 - ActivationDataset: Wraps pre-extracted activations with centering
 - split_activations: Split raw tensors into train/test (before centering)
-- Helper functions for DataLoader creation
 
 Philosophy: Use standard PyTorch patterns (Dataset, DataLoader)
 for explicit, composable data handling. Center using TRAIN mean only.
 """
 
 import torch
-from torch.utils.data import Dataset, DataLoader
-from typing import List, Tuple, Optional
-import json
-from pathlib import Path
+from torch.utils.data import Dataset
+from typing import Tuple, Optional
 
 
 class ActivationDataset(Dataset):
@@ -97,77 +94,3 @@ def split_activations(
     test_indices = perm[train_size:]
 
     return activations[train_indices], activations[test_indices]
-
-
-def create_dataloader(
-    dataset: Dataset,
-    batch_size: int = 32,
-    shuffle: bool = True,
-    num_workers: int = 0,
-    pin_memory: bool = True,
-    drop_last: bool = False,
-) -> DataLoader:
-    """
-    Create a DataLoader from a dataset with sensible defaults.
-
-    Args:
-        dataset: Dataset to load from
-        batch_size: Batch size
-        shuffle: Whether to shuffle data
-        num_workers: Number of worker processes (0 = main process only)
-        pin_memory: Pin memory for faster GPU transfer
-        drop_last: Drop last incomplete batch
-
-    Returns:
-        Configured DataLoader
-    """
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=pin_memory,
-        drop_last=drop_last,
-    )
-
-
-def load_texts_from_json(
-    path: str,
-    text_field: str = "text",
-    num_samples: Optional[int] = None,
-    shuffle: bool = True,
-    seed: int = 42,
-) -> List[str]:
-    """
-    Load text samples from a JSON file.
-
-    Expects a JSON file containing a list of objects with a text field.
-
-    Args:
-        path: Path to JSON file
-        text_field: Name of the field containing text
-        num_samples: Maximum number of samples to load (None = all)
-        shuffle: Whether to shuffle before selecting
-        seed: Random seed for shuffling
-
-    Returns:
-        List of text strings
-    """
-    path_obj = Path(path)
-    if not path_obj.exists():
-        raise FileNotFoundError(f"Data file not found: {path}")
-
-    with open(path_obj, 'r', encoding='utf-8') as f:
-        samples = json.load(f)
-
-    texts = [s[text_field] for s in samples]
-
-    if shuffle:
-        import random
-        random.seed(seed)
-        random.shuffle(texts)
-
-    if num_samples is not None:
-        texts = texts[:num_samples]
-
-    return texts

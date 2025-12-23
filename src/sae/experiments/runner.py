@@ -15,7 +15,7 @@ from dataclasses import asdict
 
 from src.sae.configs.experiment import SAEExperimentConfig
 from src.sae.configs.sae import SimpleSAEConfig, DeepSAEConfig
-from src.sae.data.datasets import create_dataloader
+from torch.utils.data import DataLoader
 from src.sae.training.train_pipeline import TrainPipeline
 from src.sae.training.schedules import WarmupThenLinearSchedule
 from src.sae.checkpoints import save_checkpoint
@@ -148,7 +148,7 @@ def run_sae_experiment(config: SAEExperimentConfig) -> dict:
     # 4. Train
     # ========================================================================
     print(f"\n[4/6] Training SAE...")
-    train_loader = create_dataloader(
+    train_loader = DataLoader(
         train_dataset,
         batch_size=config.data.training_batch_size,
         shuffle=True,

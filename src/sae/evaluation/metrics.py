@@ -64,9 +64,8 @@ def compute_sparsity(
 
 def compute_dead_features(
     sae: BaseSAE,
-    activations: torch.Tensor,
+    data_loader,
     threshold: float = 0.01,
-    batch_size: int = 256,
 ) -> Dict[str, Any]:
     """
     Compute fraction of features that never activate on given activations.
@@ -77,10 +76,8 @@ def compute_dead_features(
 
     Args:
         sae: The trained SAE model
-        activations: Evaluation activations, shape (num_samples, input_dim)
-                    Should be centered (mean-subtracted) before passing.
+        data_loader: DataLoader yielding centered activations
         threshold: Activation threshold to consider a feature "active"
-        batch_size: Batch size for processing (for memory efficiency)
 
     Returns:
         Dictionary with:
@@ -92,16 +89,14 @@ def compute_dead_features(
     """
     device = next(sae.parameters()).device
     num_features = sae.probe_dim
-    num_samples = activations.shape[0]
 
     # Track which features have ever been active
     ever_active = torch.zeros(num_features, dtype=torch.bool, device=device)
 
-    # Process in batches to avoid OOM
     sae.eval()
     with torch.no_grad():
-        for i in range(0, num_samples, batch_size):
-            batch = activations[i:i + batch_size].to(device)
+        for batch in data_loader:
+            batch = batch.to(device)
 
             # Get sparse features from SAE
             _, sparse_features, _ = sae(batch)

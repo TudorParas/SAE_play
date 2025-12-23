@@ -30,6 +30,7 @@ SIMPLE_SAE = SAEExperimentConfig(
     data=DataConfig(
         sources=[
             SourceConfig(name="wikitext", train_frac=0.9, test_frac=0.1),
+            SourceConfig(name="c4", train_frac=0.4, test_frac=0.3),
         ],
         num_samples=10000,
         extraction_batch_size=32,
@@ -76,6 +77,7 @@ DEEP_SAE = SAEExperimentConfig(
     data=DataConfig(
         sources=[
             SourceConfig(name="wikitext", train_frac=0.9, test_frac=0.1),
+            SourceConfig(name="c4", train_frac=0.4, test_frac=0.3),
         ],
         num_samples=10000,
         extraction_batch_size=8,
@@ -87,7 +89,9 @@ DEEP_SAE = SAEExperimentConfig(
     sae=DeepSAEConfig(
         encoder_hidden_dims=[4, 32],  # Multipliers of input_dim
         decoder_hidden_dims=[4],
-        sparsity_type="l1",
+
+        sparsity_type="topk",
+        sparsity_k=128,
     ),
     training=TrainingConfig(
         num_epochs=10,

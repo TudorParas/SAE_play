@@ -33,10 +33,10 @@ from dataclasses import dataclass, field
 from transformers import PreTrainedModel, PreTrainedTokenizer
 
 from src.sae.models.base import BaseSAE
-from src.sae.activations import extract_activations
 from src.sae.configs.evaluation import EvalConfig
 from src.sae.evaluation.report import ExperimentReport
-from src.sae.evaluation.metrics import compute_reconstruction_loss, compute_sparsity, get_spectral_stats
+from src.sae.evaluation.metrics import compute_reconstruction_loss, compute_sparsity, compute_dead_features, get_spectral_stats
+from src.sae.evaluation.analyzer import analyze_features
 
 
 @dataclass
@@ -60,16 +60,6 @@ class EvalResults:
             "spectral_stats": self.spectral_stats,
             "num_eval_samples": self.num_eval_samples,
         }
-
-
-@dataclass
-class AnalysisResults:
-    """Container for text analysis results."""
-    texts: list[dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for reporting."""
-        return {"texts": self.texts}
 
 
 class Evaluator:
@@ -120,11 +110,15 @@ class Evaluator:
         # Put SAE in eval mode
         self.sae.eval()
 
-        # Compute core metrics (iterate through test loader once)
-        recon_loss, sparsity_metrics, dead_features = self._compute_core_metrics(test_loader)
+        # Compute core metrics
+        recon_loss, sparsity_metrics = self._compute_core_metrics(test_loader)
         results.reconstruction_loss = recon_loss
         results.sparsity_metrics = sparsity_metrics
-        results.dead_features = dead_features
+
+        # Compute dead features (delegate to metrics.py)
+        results.dead_features = compute_dead_features(
+            self.sae, test_loader, threshold=self.config.dead_feature_threshold
+        )
 
         # Compute spectral stats
         results.spectral_stats = self._compute_spectral_stats(test_loader)
@@ -137,7 +131,7 @@ class Evaluator:
         tokenizer: PreTrainedTokenizer,
         texts: list[str],
         layer_idx: int,
-    ) -> AnalysisResults:
+    ) -> list[dict[str, Any]]:
         """
         Analyze which features activate for specific texts.
 
@@ -151,67 +145,29 @@ class Evaluator:
             layer_idx: Layer to extract activations from
 
         Returns:
-            AnalysisResults containing per-text feature analysis
+            List of dicts containing per-text feature analysis
         """
-        results = AnalysisResults()
-        threshold = self.config.dead_feature_threshold
-        top_k = self.config.feature_analysis_top_k
-
-        self.sae.eval()
-
-        for text in texts:
-            # Extract activations
-            activations = extract_activations(
-                model=model,
-                tokenizer=tokenizer,
-                texts=[text],
-                layer_idx=layer_idx,
-            )
-
-            # Center and move to device
-            centered = activations.to(self._device) - self._activation_mean_device
-
-            # Pass through SAE
-            with torch.no_grad():
-                _, sparse_features, _ = self.sae(centered)
-
-            # Average features across tokens
-            avg_features = sparse_features.mean(dim=0)
-
-            # Get top-k features
-            top_values, top_indices = torch.topk(
-                avg_features,
-                k=min(top_k, len(avg_features))
-            )
-
-            top_features = [
-                (idx.item(), val.item())
-                for idx, val in zip(top_indices, top_values)
-            ]
-
-            # Compute active count
-            num_active = (avg_features > threshold).sum().item()
-            total_features = len(avg_features)
-
-            results.texts.append({
-                "text": text,
-                "top_features": top_features,
-                "num_active": num_active,
-                "total_features": total_features,
-                "pct_active": (num_active / total_features) * 100,
-            })
-
-        return results
+        # Delegate to analyzer module
+        return analyze_features(
+            sae=self.sae,
+            model=model,
+            tokenizer=tokenizer,
+            texts=texts,
+            activation_mean=self.activation_mean,
+            layer_idx=layer_idx,
+            top_k=self.config.feature_analysis_top_k,
+            threshold=self.config.dead_feature_threshold,
+        )
 
     def _compute_core_metrics(self, test_loader: DataLoader) -> tuple:
         """
-        Compute reconstruction loss, sparsity metrics, and dead features in one pass.
+        Compute reconstruction loss and sparsity metrics.
 
         Args:
             test_loader: DataLoader yielding centered activations
 
         Returns:
-            Tuple of (recon_loss, sparsity_metrics, dead_features)
+            Tuple of (recon_loss, sparsity_metrics)
         """
         total_recon_loss = 0.0
         total_sparsity_metrics = {
@@ -220,10 +176,7 @@ class Evaluator:
             "l1_norm": 0.0,
         }
         num_batches = 0
-
-        # Track which features have ever been active (for dead feature computation)
         num_features = self.sae.probe_dim
-        ever_active = torch.zeros(num_features, dtype=torch.bool, device=self._device)
         threshold = self.config.dead_feature_threshold
 
         with torch.no_grad():
@@ -242,11 +195,6 @@ class Evaluator:
                 total_sparsity_metrics["l0_norm"] += batch_sparsity["l0_norm"]
                 total_sparsity_metrics["l1_norm"] += batch_sparsity["l1_norm"]
 
-                # Dead feature tracking
-                is_active = sparse_features > threshold
-                batch_active = is_active.any(dim=0)
-                ever_active = ever_active | batch_active
-
                 num_batches += 1
 
         # Average metrics
@@ -258,19 +206,7 @@ class Evaluator:
             "l1_norm": total_sparsity_metrics["l1_norm"] / num_batches,
         }
 
-        # Dead features
-        alive_count = ever_active.sum().item()
-        dead_count = num_features - alive_count
-
-        dead_features = {
-            "count": dead_count,
-            "fraction": dead_count / num_features,
-            "threshold": threshold,
-            "total": num_features,
-            "alive_count": alive_count,
-        }
-
-        return avg_recon_loss, sparsity_metrics, dead_features
+        return avg_recon_loss, sparsity_metrics
 
     def _compute_spectral_stats(self, test_loader: DataLoader) -> dict[str, float]:
         """
@@ -317,7 +253,7 @@ class Evaluator:
         checkpoint_path: str = "",
         save_path: str | None = None,
         eval_results: EvalResults | None = None,
-        analysis_results: AnalysisResults | None = None,
+        analysis_results: list[dict[str, Any]] | None = None,
     ) -> ExperimentReport:
         """
         Generate a complete experiment report.
@@ -334,7 +270,7 @@ class Evaluator:
             checkpoint_path: Path to saved checkpoint
             save_path: If provided, saves report to this directory
             eval_results: Pre-computed EvalResults from evaluate()
-            analysis_results: Pre-computed AnalysisResults from analyze_texts()
+            analysis_results: Pre-computed results from analyze_texts()
 
         Returns:
             ExperimentReport instance
@@ -379,8 +315,8 @@ class Evaluator:
                 reconstruction_loss=eval_results.reconstruction_loss,
                 sparsity_metrics=eval_results.sparsity_metrics,
                 # Include analysis if provided
-                feature_analysis=analysis_results.texts if analysis_results else [],
-                num_eval_samples=len(analysis_results.texts) if analysis_results else 0,
+                feature_analysis=analysis_results if analysis_results else [],
+                num_eval_samples=len(analysis_results) if analysis_results else 0,
             )
 
         # Set log and artifacts

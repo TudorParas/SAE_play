@@ -12,6 +12,22 @@ if TYPE_CHECKING:
     from src.sae.sparsity import Sparsity
 
 
+def _create_sparsity(
+    sparsity_type: str, sparsity_k: int | None, num_features: int
+) -> "Sparsity":
+    """Create a sparsity mechanism from config parameters."""
+    from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
+
+    if sparsity_type == "topk":
+        return TopKSparsity(k=sparsity_k)
+    elif sparsity_type == "l1":
+        return L1Sparsity()
+    elif sparsity_type == "jumprelu":
+        return JumpReLUSparsity(num_features=num_features)
+    else:
+        raise ValueError(f"Unknown sparsity type: {sparsity_type}")
+
+
 @dataclass
 class SimpleSAEConfig:
     """
@@ -21,13 +37,11 @@ class SimpleSAEConfig:
         hidden_dim_multiplier: Expansion factor for hidden dimension (e.g., 32 = 32x)
         sparsity_type: Type of sparsity mechanism ("topk", "l1", "jumprelu")
         sparsity_k: Number of active features (for TopK sparsity)
-        sparsity_coefficient: L1 penalty coefficient (for L1 sparsity)
     """
 
     hidden_dim_multiplier: int
     sparsity_type: Literal["topk", "l1", "jumprelu"]
     sparsity_k: int | None = None
-    sparsity_coefficient: float | None = None
 
     def resolve(self, input_dim: int, device: str) -> "BaseSAE":
         """
@@ -43,26 +57,13 @@ class SimpleSAEConfig:
         from src.sae.models.simple import SimpleSAE
 
         hidden_dim = input_dim * self.hidden_dim_multiplier
-        sparsity = self._create_sparsity(hidden_dim)
+        sparsity = _create_sparsity(self.sparsity_type, self.sparsity_k, hidden_dim)
 
         sae = SimpleSAE(
             input_dim=input_dim, hidden_dim=hidden_dim, sparsity=sparsity
         ).to(device)
 
         return sae
-
-    def _create_sparsity(self, hidden_dim: int) -> "Sparsity":
-        """Helper to create the configured sparsity mechanism."""
-        from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
-
-        if self.sparsity_type == "topk":
-            return TopKSparsity(k=self.sparsity_k)
-        elif self.sparsity_type == "l1":
-            return L1Sparsity()
-        elif self.sparsity_type == "jumprelu":
-            return JumpReLUSparsity(num_features=hidden_dim)
-        else:
-            raise ValueError(f"Unknown sparsity type: {self.sparsity_type}")
 
 
 @dataclass
@@ -77,14 +78,12 @@ class DeepSAEConfig:
                             (as multipliers of input_dim)
         sparsity_type: Type of sparsity mechanism ("topk", "l1", "jumprelu")
         sparsity_k: Number of active features (for TopK sparsity)
-        sparsity_coefficient: L1 penalty coefficient (for L1 sparsity)
     """
 
     encoder_hidden_dims: list[int]
     decoder_hidden_dims: list[int]
     sparsity_type: Literal["topk", "l1", "jumprelu"]
     sparsity_k: int | None = None
-    sparsity_coefficient: float | None = None
 
     def resolve(self, input_dim: int, device: str) -> "BaseSAE":
         """
@@ -103,7 +102,9 @@ class DeepSAEConfig:
         encoder_hidden_dims = [input_dim * m for m in self.encoder_hidden_dims]
         decoder_hidden_dims = [input_dim * m for m in self.decoder_hidden_dims]
 
-        sparsity = self._create_sparsity(encoder_hidden_dims[-1])
+        sparsity = _create_sparsity(
+            self.sparsity_type, self.sparsity_k, encoder_hidden_dims[-1]
+        )
 
         sae = DeepSAE(
             input_dim=input_dim,
@@ -113,16 +114,3 @@ class DeepSAEConfig:
         ).to(device)
 
         return sae
-
-    def _create_sparsity(self, probe_dim: int) -> "Sparsity":
-        """Helper to create the configured sparsity mechanism."""
-        from src.sae.sparsity import TopKSparsity, L1Sparsity, JumpReLUSparsity
-
-        if self.sparsity_type == "topk":
-            return TopKSparsity(k=self.sparsity_k)
-        elif self.sparsity_type == "l1":
-            return L1Sparsity()
-        elif self.sparsity_type == "jumprelu":
-            return JumpReLUSparsity(num_features=probe_dim)
-        else:
-            raise ValueError(f"Unknown sparsity type: {self.sparsity_type}")
